@@ -44,23 +44,15 @@ dados_carregados = None
 if arquivo_subido is not None:
     try:
         dados_carregados = json.load(arquivo_subido)
-        st.sidebar.success("✅ App de Validade atualizado!")
+        st.sidebar.success("✅ App de Validade carregado com sucesso!")
     except Exception as e:
         st.sidebar.error(f"❌ Erro ao ler o arquivo: {e}")
-
-# Se não subirem nada, tenta ler o arquivo padrão de backup que você tem
-if dados_carregados is None:
-    try:
-        with open("backup_controle_validade_1782571355318.json", 'r', encoding='utf-8') as f:
-            dados_carregados = json.load(f)
-    except:
-        st.warning("⚠️ Aguardando o upload do arquivo JSON para iniciar o monitoramento.")
 
 if dados_carregados and 'products' in dados_carregados:
     # Transformando em DataFrame do Pandas
     df = pd.DataFrame(dados_carregados['products'])
     
-    # Tratando as datas de validade
+    # Tratando as datas de validade (Puxando o expiryDate do arquivo)
     df['expiryDate'] = pd.to_datetime(df['expiryDate'])
     
     # Calculando quantos dias faltam com base na data de hoje
@@ -131,4 +123,4 @@ if dados_carregados and 'products' in dados_carregados:
         st.success("🎉 Nenhum produto crítico vencendo nos próximos 15 dias!")
 
 else:
-    st.info("Por favor, faça o upload do arquivo JSON na barra lateral para gerar os relatórios.")
+    st.info("👋 Olá! Por favor, faça o upload do seu arquivo de backup do aplicativo (.json) na barra lateral para gerar o painel de monitoramento.")
