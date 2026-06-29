@@ -50,15 +50,32 @@ if arquivo_subido is not None:
 
 if dados_carregados and 'products' in dados_carregados:
     # Transformando em DataFrame do Pandas
-    df = pd.DataFrame(dados_carregados['products'])
+    df_cru = pd.DataFrame(dados_carregados['products'])
     
-    # Tratando as datas de validade (Puxando o expiryDate do arquivo)
-    df['expiryDate'] = pd.to_datetime(df['expiryDate'])
+    # Criamos um DataFrame limpo para padronizar as colunas e evitar KeyError
+    df = pd.DataFrame()
     
+    # Varre as colunas originais do JSON buscando por aproximação de nome
+    for col in df_cru.columns:
+        col_lower = col.lower()
+        if 'name' in col_lower or 'produto' in col_lower:
+            df['name'] = df_cru[col].astype(str).str.strip()
+        elif 'bar' in col_lower or 'cod' in col_lower:
+            df['barcode'] = df_cru[col].astype(str).str.strip()
+        elif 'exp' in col_lower or 'val' in col_lower or 'dat' in col_lower:
+            df['expiryDate'] = pd.to_datetime(df_cru[col], errors='coerce')
+        elif 'qua' in col_lower or 'qtd' in col_lower:
+            df['quantity'] = pd.to_numeric(df_cru[col], errors='coerce').fillna(0).astype(int)
+
+    # Garantindo colunas padrão caso o JSON falte com algo
+    if 'name' not in df.columns: df['name'] = "Produto Sem Nome"
+    if 'barcode' not in df.columns: df['barcode'] = "Sem Código"
+    if 'quantity' not in df.columns: df['quantity'] = 0
+    if 'expiryDate' not in df.columns: df['expiryDate'] = pd.to_datetime(datetime.now().date())
+
     # Calculando quantos dias faltam com base na data de hoje
     hoje = pd.to_datetime(datetime.now().date())
     df['Dias_Para_Vencer'] = (df['expiryDate'] - hoje).dt.days
-    df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce').fillna(0).astype(int)
 
     # ---- 1. MÉTRICAS DE ALERTA RÁPIDO ----
     col1, col2, col3, col4 = st.columns(4)
