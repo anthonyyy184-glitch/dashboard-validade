@@ -6,7 +6,7 @@ from datetime import datetime
 # Configuração da página para o padrão Dark Premium
 st.set_page_config(page_title="Central de Validades", layout="wide")
 
-# FORÇAR MODO ESCURO COMPLETO (FUNDO PRINCIPAL + BARRA LATERAL)
+# FORÇAR MODO ESCURO COMPLETO (FUNDO PRINCIPAL + BARRA LATERAL + COMPONENTES)
 st.markdown("""
     <style>
     /* 1. Muda o fundo geral do app para escuro */
@@ -28,6 +28,24 @@ st.markdown("""
     /* 4. Corrige a cor dos textos pequenos de ajuda do upload (ex: "200MB per file") */
     small, [data-testid="stWidgetMarkdownHint"] p {
         color: #9CA3AF !important;
+    }
+
+    /* 5. FORÇA A CAIXINHA DE UPLOAD (FILE UPLOADER) A FICAR ESCURA COM TEXTO BRANCO */
+    [data-testid="stFileUploaderDropzone"] {
+        background-color: #1F2937 !important;
+        border: 2px dashed #4B5563 !important;
+    }
+    
+    /* Garante que o texto de dentro da caixinha de upload fique visível */
+    [data-testid="stFileUploaderDropzone"] div {
+        color: #FFFFFF !important;
+    }
+    
+    /* Ajusta o botão interno do upload */
+    [data-testid="stFileUploaderDropzone"] button {
+        background-color: #374151 !important;
+        color: #FFFFFF !important;
+        border: 1px solid #4B5563 !important;
     }
 
     /* Estilização dos cards de métricas */
