@@ -40,7 +40,7 @@ h1, h2, h3, h4, h5, h6, p, span, label, .stMarkdown {
     color: #FFFFFF !important; 
 }
 
-/* 5. Corrige a cor dos textos pequenos de ajuda du upload */
+/* 5. Corrige a cor dos textos pequenos de ajuda do upload */
 small, [data-testid="stWidgetMarkdownHint"] p { 
     color: #9CA3AF !important; 
 }
@@ -108,17 +108,14 @@ if arquivo_json is not None:
                 if not validade_crua:
                     validade_crua = datetime.now().strftime('%Y-%m-%d')
                 
-                # NOVA REGRA: Se o campo 'quantity' não existir, for None ou for 0, vira 1 automaticamente
-                qtd_crua = p.get('quantity', 1)
-                if qtd_crua is None:
-                    qtd = 1
-                else:
+                # CORREÇÃO DA LOGICA DE QUANTIDADE: Pega o valor exato sem forçar tudo para 1
+                if 'quantity' in p:
                     try:
-                        qtd = int(float(qtd_crua))
-                        if qtd <= 0:
-                            qtd = 1
+                        qtd = int(p['quantity'])
                     except:
                         qtd = 1
+                else:
+                    qtd = 1 # Se realmente não existir o campo no produto, assume 1
                 
                 linhas.append({
                     'Produto': nome,
@@ -154,9 +151,8 @@ if arquivo_excel is not None:
     try:
         df_excel = pd.read_excel(arquivo_excel)
         
-        # Garante segurança extra caso a planilha venha errada
+        # Respeita o valor numérico que veio da conversão do passo anterior
         df_excel['Quantidade'] = pd.to_numeric(df_excel['Quantidade'], errors='coerce').fillna(1).astype(int)
-        df_excel['Quantidade'] = df_excel['Quantidade'].apply(lambda x: 1 if x <= 0 else x)
         df_excel['Data de Validade'] = pd.to_datetime(df_excel['Data de Validade'], errors='coerce')
 
         # --- EXIBIÇÃO DE ACORDO COM A ABA SELECIONADA ---
