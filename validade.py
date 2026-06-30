@@ -2,71 +2,47 @@ import streamlit as st
 import pandas as pd
 import json
 
-# Configuração visual (Interface limpa e larga)
 st.set_page_config(page_title="Validades", layout="wide")
+st.title("📦 Teste de Soma por Etapas")
 
-st.title("📦 Conversor de Estoque por Etapas")
-st.markdown("Siga os passos abaixo para unificar o seu inventário.")
-
-# --- ETAPA 1: CARREGAMENTO DOS DADOS ---
-st.markdown("### 1️⃣ Carregar Arquivo")
-arquivo_subido = st.file_uploader("Arraste o arquivo JSON bruto do seu coletor aqui", type=["json"])
+# ETAPA 1: Upload
+arquivo_subido = st.file_uploader("Suba o seu arquivo JSON original do coletor aqui", type=["json"])
 
 if arquivo_subido is not None:
     try:
-        # Carrega os dados originais sem mexer em nada
         dados = json.load(arquivo_subido)
         df_bruto = pd.DataFrame(dados['products'])
         
-        # Garante que as colunas críticas estão limpas e sem espaços invisíveis
+        # Limpa textos e garante que a contagem base seja 1 por linha
         df_bruto['barcode'] = df_bruto['barcode'].astype(str).str.strip()
         df_bruto['name'] = df_bruto['name'].astype(str).str.strip()
+        df_bruto['quantity'] = 1  # Força cada linha do coletor a valer 1 item
         
-        # Define a quantidade base como 1 para cada linha caso não exista
-        if 'quantity' in df_bruto.columns:
-            df_bruto['quantity'] = pd.to_numeric(df_bruto['quantity'], errors='coerce').fillna(1)
-        else:
-            df_bruto['quantity'] = 1
-
-        # Mostra os dados brutos exatamente como vieram do coletor
-        st.info(f"✔ Arquivo carregado com sucesso! Encontradas {len(df_bruto)} linhas brutas no coletor.")
+        st.subheader("📋 Etapa 1: Dados Brutos do Coletor")
+        st.write(f"O coletor enviou um total de **{len(df_bruto)}** linhas de bipes.")
+        st.dataframe(df_bruto[['name', 'barcode', 'quantity']], use_container_width=True)
         
-        with st.expander("Visualizar dados originais do coletor"):
-            st.dataframe(df_bruto[['name', 'barcode']], use_container_width=True)
-
         st.markdown("---")
-
-        # --- ETAPA 2: PROCESSAMENTO E SOMA ---
-        st.markdown("### 2️⃣ Consolidação de Estoque")
-        st.markdown("Clique no botão abaixo para juntar os produtos repetidos e somar as quantidades.")
-
-        # O botão força a execução da soma apenas quando você clica
-        if st.button("🔄 Unificar e Somar Produtos", type="primary"):
-            
-            # Executa o agrupamento somando as quantidades de itens idênticos
+        st.subheader("🧮 Etapa 2: Unificação")
+        st.write("Clique no botão abaixo para ver o Python caçar as linhas repetidas e somar:")
+        
+        if st.button("Somar e Agrupar Agora", type="primary"):
+            # Agrupa e conta quantas vezes o código de barras se repete
             df_unificado = df_bruto.groupby('barcode').agg({
-                'name': 'first',       # Pega o nome do produto
-                'quantity': 'sum'      # Soma todas as linhas iguais (1 + 1 + 1...)
+                'name': 'first',
+                'quantity': 'sum'  # Conta quantos bipes idênticos foram feitos
             }).reset_index()
-
-            # Renomeia para o padrão visual do seu dashboard antigo
+            
             df_final = df_unificado.rename(columns={
                 'name': 'Produto',
                 'barcode': 'Código de Barras',
                 'quantity': 'Quantidade'
             })
-
-            # Adiciona a coluna de validade vazia para preenchimento posterior
             df_final['Data de Validade'] = ''
-            
-            # Organiza a ordem final das colunas
             df_final = df_final[['Produto', 'Código de Barras', 'Data de Validade', 'Quantidade']]
-
-            # Resultado final na tela
-            st.success(f"🎉 Sucesso! Os produtos foram unificados em {len(df_final)} itens únicos com estoques somados.")
+            
+            st.success(f"Feito! As {len(df_bruto)} linhas viraram {len(df_final)} produtos únicos.")
             st.dataframe(df_final, use_container_width=True, hide_index=True)
-
+            
     except Exception as e:
-        st.error(f"Erro ao processar o arquivo. Verifique o formato do JSON. Detalhes: {e}")
-else:
-    st.info("Aguardando o upload do arquivo JSON para iniciar a Etapa 1.")
+        st.error(f"Erro: {e}")
