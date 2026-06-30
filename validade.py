@@ -101,19 +101,26 @@ if arquivo_json is not None:
                 if not validade_crua:
                     validade_crua = datetime.now().strftime('%Y-%m-%d')
                 else:
-                    if 'T' in validade_crua:
-                        validade_crua = validade_crua.split('T')[0]
+                    if 'T' in str(validade_crua):
+                        validade_crua = str(validade_crua).split('T')[0]
                 
-                # Extração direta e sem filtros agressivos
-                qtd = p.get('quantity', 1)
-                if qtd is None or qtd <= 0:
-                    qtd = 1
+                # MAPEAMENTO DA QUANTIDADE: Tenta encontrar qualquer variação de nome de chave usada no Flutter
+                qtd = 1
+                for chave_possivel in ['quantity', 'qtd', 'amount', 'count', 'quantidade', 'stock']:
+                    if chave_possivel in p and p[chave_possivel] is not None:
+                        try:
+                            valor_capturado = int(float(p[chave_possivel]))
+                            if valor_capturado > 0:
+                                qtd = valor_capturado
+                                break
+                        except:
+                            pass
                 
                 linhas.append({
                     'Produto': nome,
                     'Código de Barras': codigo,
                     'Data de Validade': validade_crua,
-                    'Quantidade': int(qtd)
+                    'Quantidade': qtd
                 })
             
             df_converte = pd.DataFrame(linhas)
@@ -142,7 +149,7 @@ if arquivo_excel is not None:
     try:
         df_excel = pd.read_excel(arquivo_excel)
         
-        # Apenas garante a tipagem sem alterar os valores maiores que 1
+        # Garante a formatação sem destruir os dados reais gerados no passo anterior
         df_excel['Quantidade'] = pd.to_numeric(df_excel['Quantidade'], errors='coerce').fillna(1).astype(int)
         df_excel['Data de Validade'] = pd.to_datetime(df_excel['Data de Validade'], errors='coerce')
 
@@ -166,7 +173,7 @@ if arquivo_excel is not None:
             st.markdown("### 📋 Lista Geral de Monitoramento")
             df_visual = df_calculo.copy()
             df_visual['Data Formatada'] = df_visual['Data de Validade'].dt.strftime('%d/%m/%Y')
-            df_visual = df_visual.sort_values(by='Dias_Para_Vencer')[window_columns if 'window_columns' in locals() else ['Produto', 'Código de Barras', 'Data Formatada', 'Quantidade', 'Dias_Para_Vencer']]
+            df_visual = df_visual.sort_values(by='Dias_Para_Vencer')[['Produto', 'Código de Barras', 'Data Formatada', 'Quantidade', 'Dias_Para_Vencer']]
             df_visual.columns = ['Produto', 'Código de Barras', 'Data de Validade', 'Qtd no Estoque', 'Dias Restantes']
             st.dataframe(df_visual, use_container_width=True, hide_index=True)
 
