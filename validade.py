@@ -92,50 +92,47 @@ st.sidebar.write("---")
 
 # --- CARGA DE DADOS NA BARRA LATERAL ---
 st.sidebar.markdown("## 🔄 Carga de Dados")
-arquivo_subido = st.sidebar.file_uploader("📥 Upload do JSON do App de Validade", type=["json"])
 
-# Inicializa os dados na sessão se um arquivo for carregado
-if arquivo_subido is not None and 'df_produtos' not in st.session_state:
-    try:
-        dados = json.load(arquivo_subido)
-        if 'products' in dados:
-            # Carrega o DataFrame bruto diretamente da lista de produtos do aplicativo
-            df_cru = pd.DataFrame(dados['products'])
-            df_limpo = pd.DataFrame()
-            
-            # Mapeamento Direto e Forçado das colunas reais do arquivo JSON do cliente
-            # Nome do Produto
-            if 'name' in df_cru.columns:
-                df_limpo['name'] = df_cru['name'].astype(str).str.strip()
-            else:
-                df_limpo['name'] = "Produto Sem Nome"
+# Usamos um callback (on_change) para processar o arquivo assim que ele entra, guardando na sessão permanentemente
+def processar_arquivo():
+    if st.session_state['uploader_json'] is not None:
+        try:
+            dados = json.load(st.session_state['uploader_json'])
+            if 'products' in dados:
+                df_cru = pd.DataFrame(dados['products'])
+                df_limpo = pd.DataFrame()
                 
-            # Código de barras
-            if 'barcode' in df_cru.columns:
-                df_limpo['barcode'] = df_cru['barcode'].astype(str).str.strip()
-            else:
-                df_limpo['barcode'] = "Sem Código"
+                # Mapeamento Direto
+                if 'name' in df_cru.columns:
+                    df_limpo['name'] = df_cru['name'].astype(str).str.strip()
+                else:
+                    df_limpo['name'] = "Produto Sem Nome"
+                    
+                if 'barcode' in df_cru.columns:
+                    df_limpo['barcode'] = df_cru['barcode'].astype(str).str.strip()
+                else:
+                    df_limpo['barcode'] = "Sem Código"
+                    
+                if 'expiryDate' in df_cru.columns:
+                    df_limpo['expiryDate'] = pd.to_datetime(df_cru['expiryDate'], errors='coerce').dt.strftime('%Y-%m-%dT00:00:00.000')
+                else:
+                    df_limpo['expiryDate'] = datetime.now().strftime('%Y-%m-%dT00:00:00.000')
+                    
+                if 'quantity' in df_cru.columns:
+                    df_limpo['quantity'] = pd.to_numeric(df_cru['quantity'], errors='coerce').fillna(0).astype(int)
+                else:
+                    df_limpo['quantity'] = 0
                 
-            # Data de Validade
-            if 'expiryDate' in df_cru.columns:
-                df_limpo['expiryDate'] = pd.to_datetime(df_cru['expiryDate'], errors='coerce').dt.strftime('%Y-%m-%dT00:00:00.000')
-            else:
-                df_limpo['expiryDate'] = datetime.now().strftime('%Y-%m-%dT00:00:00.000')
-                
-            # Quantidade (Garante conversão numérica correta para evitar omissões na soma)
-            if 'quantity' in df_cru.columns:
-                df_limpo['quantity'] = pd.to_numeric(df_cru['quantity'], errors='coerce').fillna(0).astype(int)
-            else:
-                df_limpo['quantity'] = 0
-            
-            st.session_state['df_produtos'] = df_limpo
-            st.sidebar.success("✅ Arquivo carregado com sucesso!")
-    except Exception as e:
-        st.sidebar.error(f"❌ Erro ao ler arquivo: {e}")
+                st.session_state['df_produtos'] = df_limpo
+        except Exception as e:
+            st.sidebar.error(f"❌ Erro ao processar o arquivo: {e}")
 
-# Se o usuário limpou o uploader, limpa a sessão para pedir novo arquivo
-if arquivo_subido is None and 'df_produtos' in st.session_state:
-    del st.session_state['df_produtos']
+arquivo_subido = st.sidebar.file_uploader(
+    "📥 Upload do JSON do App de Validade", 
+    type=["json"], 
+    key="uploader_json", 
+    on_change=processar_arquivo
+)
 
 # --- CONTEÚDO PRINCIPAL ---
 if 'df_produtos' in st.session_state:
