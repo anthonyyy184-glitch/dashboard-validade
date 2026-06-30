@@ -94,72 +94,68 @@ st.sidebar.write("---")
 st.sidebar.markdown("## 🔄 Carga de Dados")
 arquivo_subido = st.sidebar.file_uploader("📥 Upload do JSON do App de Validade", type=["json"])
 
-# ETAPA 1: LEITURA ISOLADA DO ARQUIVO (SÓ RODA QUANDO UM ARQUIVO NOVO ENTRA)
-if arquivo_subido is not None:
-    # Criamos uma chave para identificar se o arquivo atual já foi processado
-    nome_arquivo_atual = arquivo_subido.name
+# Resetar os estados caso o arquivo seja removido
+if arquivo_subido is None:
+    if 'dados_prontos' in st.session_state: del st.session_state['dados_prontos']
+    if 'df_final' in st.session_state: del st.session_state['df_final']
+
+# --- ETAPA DE INTRODUÇÃO: CONVERSOR PADRONIZADOR ---
+if arquivo_subido is not None and 'dados_prontos' not in st.session_state:
+    st.info("### 🔄 Etapa 1: Padronização do Banco de Dados")
+    st.write("Arquivo JSON detectado! Para evitar erros de contagem e garantir que o painel exiba as quantidades corretas, clique no botão abaixo para processar e estruturar os dados.")
     
-    if st.session_state.get('ultimo_arquivo_carregado') != nome_arquivo_atual:
+    if st.button("🚀 Processar e Liberar Painel de KPIs"):
         try:
             dados = json.load(arquivo_subido)
             if 'products' in dados:
-                df_cru = pd.DataFrame(dados['products'])
-                df_limpo = pd.DataFrame()
+                # Transforma a lista pura do JSON diretamente em uma tabela do Pandas
+                lista_produtos = dados['products']
                 
-                # Nome do Produto
-                if 'name' in df_cru.columns:
-                    df_limpo['name'] = df_cru['name'].astype(str).str.strip()
-                else:
-                    df_limpo['name'] = "Produto Sem Nome"
+                # Criamos a tabela item por item extraindo os valores de forma cirúrgica
+                linhas = []
+                for p in lista_produtos:
+                    # Coleta o nome
+                    nome = str(p.get('name', 'Produto Sem Nome')).strip()
+                    # Coleta o código
+                    codigo = str(p.get('barcode', 'Sem Código')).strip()
+                    # Coleta a validade
+                    validade = p.get('expiryDate', p.get('validade', ''))
                     
-                # Código de Barras
-                if 'barcode' in df_cru.columns:
-                    df_limpo['barcode'] = df_cru['barcode'].astype(str).str.strip()
-                else:
-                    df_limpo['barcode'] = "Sem Código"
+                    # Coleta a quantidade vasculhando chaves possíveis (quantity, amount, qtd)
+                    qtd = 0
+                    for chave_qtd in ['quantity', 'amount', 'qtd', 'quantidade', 'Quantity']:
+                        if chave_qtd in p:
+                            # Converte estritamente para número inteiro positivo
+                            try:
+                                qtd = int(float(p[chave_qtd]))
+                                break
+                            except:
+                                pass
                     
-                # Data de Validade
-                if 'expiryDate' in df_cru.columns:
-                    df_limpo['expiryDate'] = pd.to_datetime(df_cru['expiryDate'], errors='coerce').dt.strftime('%Y-%m-%dT00:00:00.000')
-                elif 'validade' in df_cru.columns:
-                    df_limpo['expiryDate'] = pd.to_datetime(df_cru['validade'], errors='coerce').dt.strftime('%Y-%m-%dT00:00:00.000')
-                else:
-                    df_limpo['expiryDate'] = datetime.now().strftime('%Y-%m-%dT00:00:00.000')
-                    
-                # Quantidade (Mapeia variações de colunas diretamente)
-                coluna_qtd = None
-                for col in ['quantity', 'amount', 'qtd', 'quantidade', 'Quantity', 'Amount']:
-                    if col in df_cru.columns:
-                        coluna_qtd = col
-                        break
+                    linhas.append({
+                        'name': nome,
+                        'barcode': codigo,
+                        'expiryDate': validade,
+                        'quantity': qtd
+                    })
                 
-                if coluna_qtd:
-                    df_limpo['quantity'] = pd.to_numeric(df_cru[coluna_qtd], errors='coerce').fillna(0).astype(int)
-                else:
-                    df_limpo['quantity'] = 0
+                # Monta o DataFrame estruturado final
+                df_estruturado = pd.DataFrame(linhas)
                 
-                # Salvamos os dados puros originais e atualizamos a marcação do arquivo
-                st.session_state['df_original'] = df_limpo
-                st.session_state['df_editado'] = df_limpo.copy()  # Inicializa o editado igual ao original
-                st.session_state['ultimo_arquivo_carregado'] = nome_arquivo_atual
+                # Formata a coluna de data para o padrão datetime
+                df_estruturado['expiryDate'] = pd.to_datetime(df_estruturado['expiryDate'], errors='coerce').dt.strftime('%Y-%m-%dT00:00:00.000')
+                
+                # Salva o resultado definitivo na sessão
+                st.session_state['df_final'] = df_estruturado
+                st.session_state['dados_prontos'] = True
+                st.rerun()
+                
         except Exception as e:
-            st.sidebar.error(f"❌ Erro ao ler arquivo: {e}")
+            st.error(f"❌ Falha crítica ao converter a estrutura do arquivo: {e}")
 
-# Se o uploader for limpo, deleta tudo da memória para dar reset
-if arquivo_subido is None:
-    if 'df_original' in st.session_state: del st.session_state['df_original']
-    if 'df_editado' in st.session_state: del st.session_state['df_editado']
-    if 'ultimo_arquivo_carregado' in st.session_state: del st.session_state['ultimo_arquivo_carregado']
-
-# ETAPA 2: DEFINIÇÃO DE QUAL FONTE DE DADOS EXIBIR
-df_atual = None
-if 'df_editado' in st.session_state:
-    df_atual = st.session_state['df_editado']
-elif 'df_original' in st.session_state:
-    df_atual = st.session_state['df_original']
-
-# --- RENDERIZAÇÃO DAS ETAPAS NA TELA ---
-if df_atual is not None:
+# --- ETAPA 2: EXIBIÇÃO DO PAINEL PRINCIPAL ---
+if st.session_state.get('dados_prontos') and 'df_final' in st.session_state:
+    df_atual = st.session_state['df_final']
 
     # ABA 1: VISUALIZAÇÃO E ESTATÍSTICAS
     if aba_selecionada == "📊 Dashboard de Visão Geral":
@@ -170,9 +166,10 @@ if df_atual is not None:
 
         col1, col2, col3, col4 = st.columns(4)
         
-        vencidos = df_calculo[df_calculo['Dias_Para_Vencer'] < 0]['quantity'].sum()
-        critico = df_calculo[(df_calculo['Dias_Para_Vencer'] >= 0) & (df_calculo['Dias_Para_Vencer'] <= 7)]['quantity'].sum()
-        atencao = df_calculo[(df_calculo['Dias_Para_Vencer'] > 7) & (df_calculo['Dias_Para_Vencer'] <= 30)]['quantity'].sum()
+        # Filtros de soma utilizando as quantidades reais do estoque
+        vencidos = int(df_calculo[df_calculo['Dias_Para_Vencer'] < 0]['quantity'].sum())
+        critico = int(df_calculo[(df_calculo['Dias_Para_Vencer'] >= 0) & (df_calculo['Dias_Para_Vencer'] <= 7)]['quantity'].sum())
+        atencao = int(df_calculo[(df_calculo['Dias_Para_Vencer'] > 7) & (df_calculo['Dias_Para_Vencer'] <= 30)]['quantity'].sum())
         total_lotes = len(df_calculo)
 
         with col1: st.markdown(f'<div class="metric-card"><div class="metric-title">🚨 Já Vencidos</div><div class="metric-value">{vencidos} itens</div></div>', unsafe_allow_html=True)
@@ -192,8 +189,7 @@ if df_atual is not None:
         st.subheader("✏️ Edição Dinâmica do Banco de Dados")
         st.info("💡 Como usar: Dê duplo clique em qualquer célula para alterar o texto/quantidade. Para deletar uma linha, selecione-a e aperte 'Delete' no seu teclado. Use a última linha vazia para ADICIONAR novos produtos.")
         
-        # O editor agora recebe os dados e salva estritamente em uma caixinha separada
-        df_retorno_editor = st.data_editor(
+        df_editado = st.data_editor(
             df_atual,
             column_config={
                 "name": st.column_config.TextColumn("Nome do Produto", required=True, width="medium"),
@@ -206,14 +202,13 @@ if df_atual is not None:
             hide_index=True
         )
 
-        # Tranca as alterações na etapa de edição separada
-        st.session_state['df_editado'] = df_retorno_editor
+        st.session_state['df_final'] = df_editado
 
         st.write("---")
         st.subheader("💾 Exportar e Salvar Novo Arquivo")
         
         if st.button("🔄 Estruturar e Gerar Novo JSON"):
-            lista_produtos = df_retorno_editor.to_dict(orient='records')
+            lista_produtos = df_editado.to_dict(orient='records')
             json_final = {"products": lista_produtos}
             json_string = json.dumps(json_final, indent=2, ensure_ascii=False)
             
@@ -225,5 +220,5 @@ if df_atual is not None:
             )
             st.success("🎉 JSON gerado! Clique no botão acima para fazer o download.")
 
-else:
-    st.info("👋 Olá! Por favor, faça o upload do seu arquivo de backup do aplicativo (.json) na barra lateral para liberar as telas de monitoramento e edição.")
+elif arquivo_subido is None:
+    st.info("👋 Olá! Por favor, faça o upload do seu arquivo de backup do aplicativo (.json) na barra lateral para iniciar a padronização dos dados.")
