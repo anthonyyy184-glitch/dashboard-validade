@@ -115,3 +115,104 @@ def processar_arquivo():
                     df_limpo['barcode'] = "Sem Código"
                     
                 # Mapeamento da Data de Validade
+                if 'expiryDate' in df_cru.columns:
+                    df_limpo['expiryDate'] = pd.to_datetime(df_cru['expiryDate'], errors='coerce').dt.strftime('%Y-%m-%dT00:00:00.000')
+                elif 'validade' in df_cru.columns:
+                    df_limpo['expiryDate'] = pd.to_datetime(df_cru['validade'], errors='coerce').dt.strftime('%Y-%m-%dT00:00:00.000')
+                else:
+                    df_limpo['expiryDate'] = datetime.now().strftime('%Y-%m-%dT00:00:00.000')
+                    
+                # Mapeamento robusto de quantidade (procura todas as variações possíveis)
+                coluna_qtd = None
+                for col in ['quantity', 'amount', 'qtd', 'quantidade', 'Quantity', 'Amount']:
+                    if col in df_cru.columns:
+                        coluna_qtd = col
+                        break
+                
+                if coluna_qtd:
+                    df_limpo['quantity'] = pd.to_numeric(df_cru[coluna_qtd], errors='coerce').fillna(0).astype(int)
+                else:
+                    df_limpo['quantity'] = 0
+                
+                # Guarda os dados processados no estado global estável da sessão
+                st.session_state['df_produtos'] = df_limpo
+        except Exception as e:
+            st.sidebar.error(f"❌ Erro ao processar o arquivo: {e}")
+
+# Renderiza o botão de upload amarrado à função de callback estável
+arquivo_subido = st.sidebar.file_uploader(
+    "📥 Upload do JSON do App de Validade", 
+    type=["json"], 
+    key="uploader_json", 
+    on_change=processar_arquivo
+)
+
+# --- CONTEÚDO PRINCIPAL ---
+if 'df_produtos' in st.session_state:
+    df_atual = st.session_state['df_produtos']
+
+    # ABA 1: VISUALIZAÇÃO E ESTATÍSTICAS
+    if aba_selecionada == "📊 Dashboard de Visão Geral":
+        df_calculo = df_atual.copy()
+        df_calculo['expiryDate'] = pd.to_datetime(df_calculo['expiryDate'])
+        hoje = pd.to_datetime(datetime.now().date())
+        df_calculo['Dias_Para_Vencer'] = (df_calculo['expiryDate'] - hoje).dt.days
+
+        col1, col2, col3, col4 = st.columns(4)
+        
+        # Filtros de soma utilizando as quantidades reais do estoque
+        vencidos = df_calculo[df_calculo['Dias_Para_Vencer'] < 0]['quantity'].sum()
+        critico = df_calculo[(df_calculo['Dias_Para_Vencer'] >= 0) & (df_calculo['Dias_Para_Vencer'] <= 7)]['quantity'].sum()
+        atencao = df_calculo[(df_calculo['Dias_Para_Vencer'] > 7) & (df_calculo['Dias_Para_Vencer'] <= 30)]['quantity'].sum()
+        total_lotes = len(df_calculo)
+
+        with col1: st.markdown(f'<div class="metric-card"><div class="metric-title">🚨 Já Vencidos</div><div class="metric-value">{vencidos} itens</div></div>', unsafe_allow_html=True)
+        with col2: st.markdown(f'<div class="metric-card" style="border-left-color: #F59E0B;"><div class="metric-title">⚠️ Urgente (7 dias)</div><div class="metric-value">{critico} itens</div></div>', unsafe_allow_html=True)
+        with col3: st.markdown(f'<div class="metric-card" style="border-left-color: #10B981;"><div class="metric-title">📅 Atenção (30 dias)</div><div class="metric-value">{atencao} itens</div></div>', unsafe_allow_html=True)
+        with col4: st.markdown(f'<div class="metric-card" style="border-left-color: #3B82F6;"><div class="metric-title">📦 Total de Lotes</div><div class="metric-value">{total_lotes} cadastros</div></div>', unsafe_allow_html=True)
+
+        st.markdown("### 📋 Lista Geral de Monitoramento")
+        df_visual = df_calculo.copy()
+        df_visual['Data de Validade'] = df_visual['expiryDate'].dt.strftime('%d/%m/%Y')
+        df_visual = df_visual.sort_values(by='Dias_Para_Vencer')[['name', 'barcode', 'Data de Validade', 'quantity', 'Dias_Para_Vencer']]
+        df_visual.columns = ['Produto', 'Código de Barras', 'Data de Validade', 'Qtd no Estoque', 'Dias Restantes']
+        st.dataframe(df_visual, use_container_width=True, hide_index=True)
+
+    # ABA 2: EDITOR E EXPORTADOR DE DADOS
+    elif aba_selecionada == "✏️ Gerenciador / Editor de Dados":
+        st.subheader("✏️ Edição Dinâmica do Banco de Dados")
+        st.info("💡 Como usar: Dê duplo clique em qualquer célula para alterar o texto/quantidade. Para deletar uma linha, selecione-a e aperte 'Delete' no seu teclado. Use a última linha vazia para ADICIONAR novos produtos.")
+        
+        df_editado = st.data_editor(
+            df_atual,
+            column_config={
+                "name": st.column_config.TextColumn("Nome do Produto", required=True, width="medium"),
+                "barcode": st.column_config.TextColumn("Código de Barras", required=True),
+                "expiryDate": st.column_config.TextColumn("Data de Validade (AAAA-MM-DD)", required=True),
+                "quantity": st.column_config.NumberColumn("Quantidade", min_value=0, default=0, step=1)
+            },
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.session_state['df_produtos'] = df_editado
+
+        st.write("---")
+        st.subheader("💾 Exportar e Salvar Novo Arquivo")
+        
+        if st.button("🔄 Estruturar e Gerar Novo JSON"):
+            lista_produtos = df_editado.to_dict(orient='records')
+            json_final = {"products": lista_produtos}
+            json_string = json.dumps(json_final, indent=2, ensure_ascii=False)
+            
+            st.download_button(
+                label="📥 Baixar Novo Arquivo JSON Atualizado",
+                data=json_string,
+                file_name=f"backup_validade_atualizado_{datetime.now().strftime('%d%m%Y_%H%M')}.json",
+                mime="application/json"
+            )
+            st.success("🎉 JSON gerado! Clique no botão acima para fazer o download.")
+
+else:
+    st.info("👋 Olá! Por favor, faça o upload do seu arquivo de backup do aplicativo (.json) na barra lateral para liberar as telas de monitoramento e edição.")
