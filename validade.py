@@ -28,7 +28,7 @@ st.markdown("""
     border-radius: 50% !important;
 }
 
-/* Garante que o ícone da setinha dentro do botão mude de col */
+/* Garante que o ícone da setinha dentro do botão mude de cor */
 [data-testid="stSidebarCollapseButton"] svg {
     fill: #FFFFFF !important;
     color: #FFFFFF !important;
@@ -82,8 +82,8 @@ small, [data-testid="stWidgetMarkdownHint"] p {
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🛡️ Sistema de Gestão de Validades e Perdas")
-st.caption("Visualize, edite, adicione ou exclua lotes de produtos em tempo real")
+st.title("🛡️ Central de Validades e Estoque")
+st.caption("Gerenciamento dinâmico e monitoramento de lotes")
 st.write("---")
 
 # --- NAVEGAÇÃO ENTRE ABAS ---
@@ -99,29 +99,37 @@ if arquivo_subido is not None and 'df_produtos' not in st.session_state:
     try:
         dados = json.load(arquivo_subido)
         if 'products' in dados:
+            # Carrega o DataFrame bruto diretamente da lista de produtos do aplicativo
             df_cru = pd.DataFrame(dados['products'])
             df_limpo = pd.DataFrame()
             
-            # Mapeamento flexível de colunas
-            for col in df_cru.columns:
-                col_lower = col.lower()
-                if 'name' in col_lower or 'produto' in col_lower:
-                    df_limpo['name'] = df_cru[col].astype(str).str.strip()
-                elif 'bar' in col_lower or 'cod' in col_lower:
-                    df_limpo['barcode'] = df_cru[col].astype(str).str.strip()
-                elif 'exp' in col_lower or 'val' in col_lower or 'dat' in col_lower:
-                    df_limpo['expiryDate'] = pd.to_datetime(df_cru[col], errors='coerce').dt.strftime('%Y-%m-%dT00:00:00.000')
-                elif 'qua' in col_lower or 'qtd' in col_lower:
-                    df_limpo['quantity'] = pd.to_numeric(df_cru[col], errors='coerce').fillna(0).astype(int)
-            
-            # Preenche colunas obrigatórias vazias
-            if 'name' not in df_limpo.columns: df_limpo['name'] = "Produto Sem Nome"
-            if 'barcode' not in df_limpo.columns: df_limpo['barcode'] = "Sem Código"
-            if 'quantity' not in df_limpo.columns: df_limpo['quantity'] = 0
-            if 'expiryDate' not in df_limpo.columns: df_limpo['expiryDate'] = datetime.now().strftime('%Y-%m-%dT00:00:00.000')
+            # Mapeamento Direto e Forçado das colunas reais do arquivo JSON do cliente
+            # Nome do Produto
+            if 'name' in df_cru.columns:
+                df_limpo['name'] = df_cru['name'].astype(str).str.strip()
+            else:
+                df_limpo['name'] = "Produto Sem Nome"
+                
+            # Código de barras
+            if 'barcode' in df_cru.columns:
+                df_limpo['barcode'] = df_cru['barcode'].astype(str).str.strip()
+            else:
+                df_limpo['barcode'] = "Sem Código"
+                
+            # Data de Validade
+            if 'expiryDate' in df_cru.columns:
+                df_limpo['expiryDate'] = pd.to_datetime(df_cru['expiryDate'], errors='coerce').dt.strftime('%Y-%m-%dT00:00:00.000')
+            else:
+                df_limpo['expiryDate'] = datetime.now().strftime('%Y-%m-%dT00:00:00.000')
+                
+            # Quantidade (Garante conversão numérica correta para evitar omissões na soma)
+            if 'quantity' in df_cru.columns:
+                df_limpo['quantity'] = pd.to_numeric(df_cru['quantity'], errors='coerce').fillna(0).astype(int)
+            else:
+                df_limpo['quantity'] = 0
             
             st.session_state['df_produtos'] = df_limpo
-            st.sidebar.success("✅ Arquivo carregado!")
+            st.sidebar.success("✅ Arquivo carregado com sucesso!")
     except Exception as e:
         st.sidebar.error(f"❌ Erro ao ler arquivo: {e}")
 
@@ -141,6 +149,8 @@ if 'df_produtos' in st.session_state:
         df_calculo['Dias_Para_Vencer'] = (df_calculo['expiryDate'] - hoje).dt.days
 
         col1, col2, col3, col4 = st.columns(4)
+        
+        # Filtros de soma utilizando as quantidades reais do estoque
         vencidos = df_calculo[df_calculo['Dias_Para_Vencer'] < 0]['quantity'].sum()
         critico = df_calculo[(df_calculo['Dias_Para_Vencer'] >= 0) & (df_calculo['Dias_Para_Vencer'] <= 7)]['quantity'].sum()
         atencao = df_calculo[(df_calculo['Dias_Para_Vencer'] > 7) & (df_calculo['Dias_Para_Vencer'] <= 30)]['quantity'].sum()
@@ -160,4 +170,39 @@ if 'df_produtos' in st.session_state:
 
     # ABA 2: EDITOR E EXPORTADOR DE DADOS
     elif aba_selecionada == "✏️ Gerenciador / Editor de Dados":
-        st.subheader
+        st.subheader("✏️ Edição Dinâmica do Banco de Dados")
+        st.info("💡 Como usar: Dê duplo clique em qualquer célula para alterar o texto/quantidade. Para deletar uma linha, selecione-a e aperte 'Delete' no seu teclado. Use a última linha vazia para ADICIONAR novos produtos.")
+        
+        df_editado = st.data_editor(
+            df_atual,
+            column_config={
+                "name": st.column_config.TextColumn("Nome do Produto", required=True, width="medium"),
+                "barcode": st.column_config.TextColumn("Código de Barras", required=True),
+                "expiryDate": st.column_config.TextColumn("Data de Validade (AAAA-MM-DD)", required=True),
+                "quantity": st.column_config.NumberColumn("Quantidade", min_value=0, default=0, step=1)
+            },
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.session_state['df_produtos'] = df_editado
+
+        st.write("---")
+        st.subheader("💾 Exportar e Salvar Novo Arquivo")
+        
+        if st.button("🔄 Estruturar e Gerar Novo JSON"):
+            lista_produtos = df_editado.to_dict(orient='records')
+            json_final = {"products": lista_produtos}
+            json_string = json.dumps(json_final, indent=2, ensure_ascii=False)
+            
+            st.download_button(
+                label="📥 Baixar Novo Arquivo JSON Atualizado",
+                data=json_string,
+                file_name=f"backup_validade_atualizado_{datetime.now().strftime('%d%m%Y_%H%M')}.json",
+                mime="application/json"
+            )
+            st.success("🎉 JSON gerado! Clique no botão acima para fazer o download.")
+
+else:
+    st.info("👋 Olá! Por favor, faça o upload do seu arquivo de backup do aplicativo (.json) na barra lateral para liberar as telas de monitoramento e edição.")
