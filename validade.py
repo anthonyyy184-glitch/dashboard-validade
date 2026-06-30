@@ -40,7 +40,7 @@ h1, h2, h3, h4, h5, h6, p, span, label, .stMarkdown {
     color: #FFFFFF !important; 
 }
 
-/* 5. Corrige a cor dos textos pequenos de ajuda do upload */
+/* 5. Corrige a cor dos textos pequenos de ajuda du upload */
 small, [data-testid="stWidgetMarkdownHint"] p { 
     color: #9CA3AF !important; 
 }
@@ -101,21 +101,24 @@ if arquivo_json is not None:
             linhas = []
             
             for p in lista_produtos:
-                # Coleta usando as chaves exatas mapeadas do arquivo real do cliente
                 nome = str(p.get('name', 'Produto Sem Nome')).strip()
                 codigo = str(p.get('barcode', 'Sem Código')).strip()
                 
-                # Captura de data corrigida (evita nulos)
                 validade_crua = p.get('expiryDate', '')
                 if not validade_crua:
                     validade_crua = datetime.now().strftime('%Y-%m-%d')
                 
-                # Captura de quantidade corrigida (case-sensitive estrito para quantity)
-                qtd_crua = p.get('quantity', 0)
-                try:
-                    qtd = int(float(qtd_crua))
-                except:
-                    qtd = 0
+                # NOVA REGRA: Se o campo 'quantity' não existir, for None ou for 0, vira 1 automaticamente
+                qtd_crua = p.get('quantity', 1)
+                if qtd_crua is None:
+                    qtd = 1
+                else:
+                    try:
+                        qtd = int(float(qtd_crua))
+                        if qtd <= 0:
+                            qtd = 1
+                    except:
+                        qtd = 1
                 
                 linhas.append({
                     'Produto': nome,
@@ -149,11 +152,11 @@ arquivo_excel = st.file_uploader("📥 Envie a tabela Excel convertida (.xlsx) p
 
 if arquivo_excel is not None:
     try:
-        # Lê o Excel mantendo os tipos originais intactos
         df_excel = pd.read_excel(arquivo_excel)
         
-        # Converte as colunas para os tipos corretos de exibição e cálculo
-        df_excel['Quantidade'] = pd.to_numeric(df_excel['Quantidade'], errors='coerce').fillna(0).astype(int)
+        # Garante segurança extra caso a planilha venha errada
+        df_excel['Quantidade'] = pd.to_numeric(df_excel['Quantidade'], errors='coerce').fillna(1).astype(int)
+        df_excel['Quantidade'] = df_excel['Quantidade'].apply(lambda x: 1 if x <= 0 else x)
         df_excel['Data de Validade'] = pd.to_datetime(df_excel['Data de Validade'], errors='coerce')
 
         # --- EXIBIÇÃO DE ACORDO COM A ABA SELECIONADA ---
@@ -194,7 +197,7 @@ if arquivo_excel is not None:
                     "Produto": st.column_config.TextColumn("Nome do Produto", required=True, width="medium"),
                     "Código de Barras": st.column_config.TextColumn("Código de Barras", required=True),
                     "Data de Validade": st.column_config.TextColumn("Validade (AAAA-MM-DD)", required=True),
-                    "Quantidade": st.column_config.NumberColumn("Quantidade", min_value=0, default=0, step=1)
+                    "Quantidade": st.column_config.NumberColumn("Quantidade", min_value=1, default=1, step=1)
                 },
                 num_rows="dynamic",
                 use_container_width=True,
