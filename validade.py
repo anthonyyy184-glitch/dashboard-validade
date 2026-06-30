@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import json
+import io
 from datetime import datetime
 
 # Configuração da página para o padrão Dark Premium
@@ -55,7 +56,6 @@ small, [data-testid="stWidgetMarkdownHint"] p {
 [data-testid="stFileUploaderDropzone"] button { 
     background-color: #374151 !important; 
     color: #FFFFFF !important; 
-    border: 1px solid #4B5563 !important; 
 }
 
 /* Customização dos botões de ação */
@@ -83,142 +83,146 @@ small, [data-testid="stWidgetMarkdownHint"] p {
 """, unsafe_allow_html=True)
 
 st.title("🛡️ Central de Validades e Estoque")
-st.caption("Gerenciamento dinâmico e monitoramento de lotes")
+st.caption("Gerenciamento dinâmico e monitoramento de lotes via planilha")
 st.write("---")
 
-# --- NAVEGAÇÃO ENTRE ABAS ---
+# Navegação lateral simples
 aba_selecionada = st.sidebar.radio("📂 Navegação do Sistema", ["📊 Dashboard de Visão Geral", "✏️ Gerenciador / Editor de Dados"])
-st.sidebar.write("---")
 
-# --- CARGA DE DADOS NA BARRA LATERAL ---
-st.sidebar.markdown("## 🔄 Carga de Dados")
-arquivo_subido = st.sidebar.file_uploader("📥 Upload do JSON do App de Validade", type=["json"])
+# --- PASSO 1: CONVERSOR DE JSON PARA EXCEL ---
+st.markdown("### 🔄 Passo 1: Converter JSON do Aplicativo para Excel")
+arquivo_json = st.file_uploader("📥 Envie o arquivo .json do seu aplicativo aqui", type=["json"], key="json_uploader")
 
-# Resetar os estados caso o arquivo seja removido
-if arquivo_subido is None:
-    if 'dados_prontos' in st.session_state: del st.session_state['dados_prontos']
-    if 'df_final' in st.session_state: del st.session_state['df_final']
-
-# --- ETAPA DE INTRODUÇÃO: CONVERSOR PADRONIZADOR ---
-if arquivo_subido is not None and 'dados_prontos' not in st.session_state:
-    st.info("### 🔄 Etapa 1: Padronização do Banco de Dados")
-    st.write("Arquivo JSON detectado! Para evitar erros de contagem e garantir que o painel exiba as quantidades corretas, clique no botão abaixo para processar e estruturar os dados.")
-    
-    if st.button("🚀 Processar e Liberar Painel de KPIs"):
-        try:
-            dados = json.load(arquivo_subido)
-            if 'products' in dados:
-                # Transforma a lista pura do JSON diretamente em uma tabela do Pandas
-                lista_produtos = dados['products']
-                
-                # Criamos a tabela item por item extraindo os valores de forma cirúrgica
-                linhas = []
-                for p in lista_produtos:
-                    # Coleta o nome
-                    nome = str(p.get('name', 'Produto Sem Nome')).strip()
-                    # Coleta o código
-                    codigo = str(p.get('barcode', 'Sem Código')).strip()
-                    # Coleta a validade
-                    validade = p.get('expiryDate', p.get('validade', ''))
-                    
-                    # Coleta a quantidade vasculhando chaves possíveis (quantity, amount, qtd)
-                    qtd = 0
-                    for chave_qtd in ['quantity', 'amount', 'qtd', 'quantidade', 'Quantity']:
-                        if chave_qtd in p:
-                            # Converte estritamente para número inteiro positivo
-                            try:
-                                qtd = int(float(p[chave_qtd]))
-                                break
-                            except:
-                                pass
-                    
-                    linhas.append({
-                        'name': nome,
-                        'barcode': codigo,
-                        'expiryDate': validade,
-                        'quantity': qtd
-                    })
-                
-                # Monta o DataFrame estruturado final
-                df_estruturado = pd.DataFrame(linhas)
-                
-                # Formata a coluna de data para o padrão datetime
-                df_estruturado['expiryDate'] = pd.to_datetime(df_estruturado['expiryDate'], errors='coerce').dt.strftime('%Y-%m-%dT00:00:00.000')
-                
-                # Salva o resultado definitivo na sessão
-                st.session_state['df_final'] = df_estruturado
-                st.session_state['dados_prontos'] = True
-                st.rerun()
-                
-        except Exception as e:
-            st.error(f"❌ Falha crítica ao converter a estrutura do arquivo: {e}")
-
-# --- ETAPA 2: EXIBIÇÃO DO PAINEL PRINCIPAL ---
-if st.session_state.get('dados_prontos') and 'df_final' in st.session_state:
-    df_atual = st.session_state['df_final']
-
-    # ABA 1: VISUALIZAÇÃO E ESTATÍSTICAS
-    if aba_selecionada == "📊 Dashboard de Visão Geral":
-        df_calculo = df_atual.copy()
-        df_calculo['expiryDate'] = pd.to_datetime(df_calculo['expiryDate'])
-        hoje = pd.to_datetime(datetime.now().date())
-        df_calculo['Dias_Para_Vencer'] = (df_calculo['expiryDate'] - hoje).dt.days
-
-        col1, col2, col3, col4 = st.columns(4)
-        
-        # Filtros de soma utilizando as quantidades reais do estoque
-        vencidos = int(df_calculo[df_calculo['Dias_Para_Vencer'] < 0]['quantity'].sum())
-        critico = int(df_calculo[(df_calculo['Dias_Para_Vencer'] >= 0) & (df_calculo['Dias_Para_Vencer'] <= 7)]['quantity'].sum())
-        atencao = int(df_calculo[(df_calculo['Dias_Para_Vencer'] > 7) & (df_calculo['Dias_Para_Vencer'] <= 30)]['quantity'].sum())
-        total_lotes = len(df_calculo)
-
-        with col1: st.markdown(f'<div class="metric-card"><div class="metric-title">🚨 Já Vencidos</div><div class="metric-value">{vencidos} itens</div></div>', unsafe_allow_html=True)
-        with col2: st.markdown(f'<div class="metric-card" style="border-left-color: #F59E0B;"><div class="metric-title">⚠️ Urgente (7 dias)</div><div class="metric-value">{critico} itens</div></div>', unsafe_allow_html=True)
-        with col3: st.markdown(f'<div class="metric-card" style="border-left-color: #10B981;"><div class="metric-title">📅 Atenção (30 dias)</div><div class="metric-value">{atencao} itens</div></div>', unsafe_allow_html=True)
-        with col4: st.markdown(f'<div class="metric-card" style="border-left-color: #3B82F6;"><div class="metric-title">📦 Total de Lotes</div><div class="metric-value">{total_lotes} cadastros</div></div>', unsafe_allow_html=True)
-
-        st.markdown("### 📋 Lista Geral de Monitoramento")
-        df_visual = df_calculo.copy()
-        df_visual['Data de Validade'] = df_visual['expiryDate'].dt.strftime('%d/%m/%Y')
-        df_visual = df_visual.sort_values(by='Dias_Para_Vencer')[['name', 'barcode', 'Data de Validade', 'quantity', 'Dias_Para_Vencer']]
-        df_visual.columns = ['Produto', 'Código de Barras', 'Data de Validade', 'Qtd no Estoque', 'Dias Restantes']
-        st.dataframe(df_visual, use_container_width=True, hide_index=True)
-
-    # ABA 2: EDITOR E EXPORTADOR DE DADOS
-    elif aba_selecionada == "✏️ Gerenciador / Editor de Dados":
-        st.subheader("✏️ Edição Dinâmica do Banco de Dados")
-        st.info("💡 Como usar: Dê duplo clique em qualquer célula para alterar o texto/quantidade. Para deletar uma linha, selecione-a e aperte 'Delete' no seu teclado. Use a última linha vazia para ADICIONAR novos produtos.")
-        
-        df_editado = st.data_editor(
-            df_atual,
-            column_config={
-                "name": st.column_config.TextColumn("Nome do Produto", required=True, width="medium"),
-                "barcode": st.column_config.TextColumn("Código de Barras", required=True),
-                "expiryDate": st.column_config.TextColumn("Data de Validade (AAAA-MM-DD)", required=True),
-                "quantity": st.column_config.NumberColumn("Quantidade", min_value=0, default=0, step=1)
-            },
-            num_rows="dynamic",
-            use_container_width=True,
-            hide_index=True
-        )
-
-        st.session_state['df_final'] = df_editado
-
-        st.write("---")
-        st.subheader("💾 Exportar e Salvar Novo Arquivo")
-        
-        if st.button("🔄 Estruturar e Gerar Novo JSON"):
-            lista_produtos = df_editado.to_dict(orient='records')
-            json_final = {"products": lista_produtos}
-            json_string = json.dumps(json_final, indent=2, ensure_ascii=False)
+if arquivo_json is not None:
+    try:
+        dados = json.load(arquivo_json)
+        if 'products' in dados:
+            lista_produtos = dados['products']
+            linhas = []
             
+            for p in lista_produtos:
+                nome = str(p.get('name', 'Produto Sem Nome')).strip()
+                codigo = str(p.get('barcode', 'Sem Código')).strip()
+                validade_crua = p.get('expiryDate', p.get('validade', ''))
+                
+                # Mapeamento e limpeza manual de quantidades
+                qtd = 0
+                for chave_qtd in ['quantity', 'amount', 'qtd', 'quantidade', 'Quantity']:
+                    if chave_qtd in p:
+                        try:
+                            qtd = int(float(p[chave_qtd]))
+                            break
+                        except:
+                            pass
+                
+                linhas.append({
+                    'Produto': nome,
+                    'Código de Barras': codigo,
+                    'Data de Validade': validade_crua,
+                    'Quantidade': qtd
+                })
+            
+            df_converte = pd.DataFrame(linhas)
+            
+            # Cria o arquivo Excel na memória do servidor para o usuário baixar
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df_converte.to_excel(writer, index=False, sheet_name='Validades')
+            
+            st.success("✅ JSON processado com sucesso!")
             st.download_button(
-                label="📥 Baixar Novo Arquivo JSON Atualizado",
-                data=json_string,
-                file_name=f"backup_validade_atualizado_{datetime.now().strftime('%d%m%Y_%H%M')}.json",
-                mime="application/json"
+                label="📥 Baixar Banco de Dados em formato Excel (.xlsx)",
+                data=buffer.getvalue(),
+                file_name="tabela_validade_convertida.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-            st.success("🎉 JSON gerado! Clique no botão acima para fazer o download.")
+    except Exception as e:
+        st.error(f"Erro ao processar o JSON: {e}")
 
-elif arquivo_subido is None:
-    st.info("👋 Olá! Por favor, faça o upload do seu arquivo de backup do aplicativo (.json) na barra lateral para iniciar a padronização dos dados.")
+st.write("---")
+
+# --- PASSO 2: UPLOAD DA TABELA CERTINHA E EXIBIÇÃO ---
+st.markdown("### 📊 Passo 2: Carregar a Tabela Excel (.xlsx) no Sistema")
+arquivo_excel = st.file_uploader("📥 Envie a tabela Excel convertida (.xlsx) para liberar os KPIs", type=["xlsx"], key="excel_uploader")
+
+if arquivo_excel is not None:
+    try:
+        # Lê o Excel garantindo as tipagens corretas
+        df_excel = pd.read_excel(arquivo_excel)
+        
+        # Garante colunas mínimas e preenchimento
+        if 'Quantidade' in df_excel.columns:
+            df_excel['Quantidade'] = pd.to_numeric(df_excel['Quantidade'], errors='coerce').fillna(0).astype(int)
+        else:
+            df_excel['Quantidade'] = 0
+            
+        if 'Data de Validade' in df_excel.columns:
+            df_excel['Data de Validade'] = pd.to_datetime(df_excel['Data de Validade'], errors='coerce')
+        else:
+            df_excel['Data de Validade'] = pd.to_datetime(datetime.now().date())
+
+        # --- EXIBIÇÃO DE ACORDO COM A ABA SELECIONADA ---
+        if aba_selecionada == "📊 Dashboard de Visão Geral":
+            df_calculo = df_excel.copy()
+            hoje = pd.to_datetime(datetime.now().date())
+            df_calculo['Dias_Para_Vencer'] = (df_calculo['Data de Validade'] - hoje).dt.days
+
+            col1, col2, col3, col4 = st.columns(4)
+            
+            vencidos = int(df_calculo[df_calculo['Dias_Para_Vencer'] < 0]['Quantidade'].sum())
+            critico = int(df_calculo[(df_calculo['Dias_Para_Vencer'] >= 0) & (df_calculo['Dias_Para_Vencer'] <= 7)]['Quantidade'].sum())
+            atencao = int(df_calculo[(df_calculo['Dias_Para_Vencer'] > 7) & (df_calculo['Dias_Para_Vencer'] <= 30)]['Quantidade'].sum())
+            total_lotes = len(df_calculo)
+
+            with col1: st.markdown(f'<div class="metric-card"><div class="metric-title">🚨 Já Vencidos</div><div class="metric-value">{vencidos} itens</div></div>', unsafe_allow_html=True)
+            with col2: st.markdown(f'<div class="metric-card" style="border-left-color: #F59E0B;"><div class="metric-title">⚠️ Urgente (7 dias)</div><div class="metric-value">{critico} itens</div></div>', unsafe_allow_html=True)
+            with col3: st.markdown(f'<div class="metric-card" style="border-left-color: #10B981;"><div class="metric-title">📅 Atenção (30 dias)</div><div class="metric-value">{atencao} itens</div></div>', unsafe_allow_html=True)
+            with col4: st.markdown(f'<div class="metric-card" style="border-left-color: #3B82F6;"><div class="metric-title">📦 Total de Lotes</div><div class="metric-value">{total_lotes} cadastros</div></div>', unsafe_allow_html=True)
+
+            st.markdown("### 📋 Lista Geral de Monitoramento")
+            df_visual = df_calculo.copy()
+            df_visual['Data Formatada'] = df_visual['Data de Validade'].dt.strftime('%d/%m/%Y')
+            df_visual = df_visual.sort_values(by='Dias_Para_Vencer')[['Produto', 'Código de Barras', 'Data Formatada', 'Quantidade', 'Dias_Para_Vencer']]
+            df_visual.columns = ['Produto', 'Código de Barras', 'Data de Validade', 'Qtd no Estoque', 'Dias Restantes']
+            st.dataframe(df_visual, use_container_width=True, hide_index=True)
+
+        elif aba_selecionada == "✏️ Gerenciador / Editor de Dados":
+            st.subheader("✏️ Edição Dinâmica da Planilha")
+            st.info("💡 Como usar: Altere as células dando duplo clique. Use a última linha vazia para ADICIONAR novos produtos.")
+            
+            # Formata a data para texto simples para facilitar a edição pelo usuário
+            df_edit_view = df_excel.copy()
+            df_edit_view['Data de Validade'] = df_edit_view['Data de Validade'].dt.strftime('%Y-%m-%d')
+
+            df_editado = st.data_editor(
+                df_edit_view,
+                column_config={
+                    "Produto": st.column_config.TextColumn("Nome do Produto", required=True, width="medium"),
+                    "Código de Barras": st.column_config.TextColumn("Código de Barras", required=True),
+                    "Data de Validade": st.column_config.TextColumn("Validade (AAAA-MM-DD)", required=True),
+                    "Quantidade": st.column_config.NumberColumn("Quantidade", min_value=0, default=0, step=1)
+                },
+                num_rows="dynamic",
+                use_container_width=True,
+                hide_index=True
+            )
+
+            st.write("---")
+            st.subheader("💾 Salvar Planilha Atualizada")
+            
+            # Permite re-exportar em Excel direto
+            buffer_salvar = io.BytesIO()
+            with pd.ExcelWriter(buffer_salvar, engine='openpyxl') as writer:
+                df_editado.to_excel(writer, index=False, sheet_name='Validades')
+                
+            st.download_button(
+                label="📥 Baixar Planilha Excel Modificada",
+                data=buffer_salvar.getvalue(),
+                file_name="tabela_validade_atualizada.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+    except Exception as e:
+        st.error(f"Erro ao ler a tabela Excel: {e}")
+else:
+    st.info("👋 Aguardando o upload da tabela Excel (.xlsx) no Passo 2 para carregar as telas e os indicadores.")
