@@ -21,7 +21,7 @@ st.markdown("""
     background-color: #111827 !important; 
 }
 
-/* 3. CORREÇÃO DA SETINHA DO CELULAR: Força o botão de abrir/fechar a barra lateral a ficar visível */
+/* 3. CORREÇÃO DA SETINHA DO CELULAR */
 [data-testid="stSidebarCollapseButton"] button {
     background-color: #1F2937 !important;
     color: #FFFFFF !important;
@@ -29,23 +29,19 @@ st.markdown("""
     border-radius: 50% !important;
 }
 
-/* Garante que o ícone da setinha dentro do botão mude de cor */
 [data-testid="stSidebarCollapseButton"] svg {
     fill: #FFFFFF !important;
     color: #FFFFFF !important;
 }
 
-/* 4. Garante que todos os textos, títulos e etiquetas fiquem brancos/claros */
 h1, h2, h3, h4, h5, h6, p, span, label, .stMarkdown { 
     color: #FFFFFF !important; 
 }
 
-/* 5. Corrige a cor dos textos pequenos de ajuda do upload */
 small, [data-testid="stWidgetMarkdownHint"] p { 
     color: #9CA3AF !important; 
 }
 
-/* 6. Força a caixinha de upload (File Uploader) a ficar escura */
 [data-testid="stFileUploaderDropzone"] { 
     background-color: #1F2937 !important; 
     border: 2px dashed #4B5563 !important; 
@@ -58,7 +54,6 @@ small, [data-testid="stWidgetMarkdownHint"] p {
     color: #FFFFFF !important; 
 }
 
-/* Customização dos botões de ação */
 .stButton>button {
     background-color: #10B981 !important;
     color: white !important;
@@ -68,7 +63,6 @@ small, [data-testid="stWidgetMarkdownHint"] p {
     padding: 10px 20px !important;
 }
 
-/* Estilização dos cards de métricas */
 .metric-card {
     background-color: #1F2937;
     padding: 20px;
@@ -86,7 +80,6 @@ st.title("🛡️ Central de Validades e Estoque")
 st.caption("Gerenciamento dinâmico e monitoramento de lotes via planilha")
 st.write("---")
 
-# Navegação lateral
 aba_selecionada = st.sidebar.radio("📂 Navegação do Sistema", ["📊 Dashboard de Visão Geral", "✏️ Gerenciador / Editor de Dados"])
 
 # --- PASSO 1: CONVERSOR DE JSON PARA EXCEL ---
@@ -107,26 +100,24 @@ if arquivo_json is not None:
                 validade_crua = p.get('expiryDate', '')
                 if not validade_crua:
                     validade_crua = datetime.now().strftime('%Y-%m-%d')
-                
-                # CORREÇÃO DA LOGICA DE QUANTIDADE: Pega o valor exato sem forçar tudo para 1
-                if 'quantity' in p:
-                    try:
-                        qtd = int(p['quantity'])
-                    except:
-                        qtd = 1
                 else:
-                    qtd = 1 # Se realmente não existir o campo no produto, assume 1
+                    if 'T' in validade_crua:
+                        validade_crua = validade_crua.split('T')[0]
+                
+                # Extração direta e sem filtros agressivos
+                qtd = p.get('quantity', 1)
+                if qtd is None or qtd <= 0:
+                    qtd = 1
                 
                 linhas.append({
                     'Produto': nome,
                     'Código de Barras': codigo,
                     'Data de Validade': validade_crua,
-                    'Quantidade': qtd
+                    'Quantidade': int(qtd)
                 })
             
             df_converte = pd.DataFrame(linhas)
             
-            # Cria o arquivo Excel na memória do servidor
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                 df_converte.to_excel(writer, index=False, sheet_name='Validades')
@@ -151,11 +142,10 @@ if arquivo_excel is not None:
     try:
         df_excel = pd.read_excel(arquivo_excel)
         
-        # Respeita o valor numérico que veio da conversão do passo anterior
+        # Apenas garante a tipagem sem alterar os valores maiores que 1
         df_excel['Quantidade'] = pd.to_numeric(df_excel['Quantidade'], errors='coerce').fillna(1).astype(int)
         df_excel['Data de Validade'] = pd.to_datetime(df_excel['Data de Validade'], errors='coerce')
 
-        # --- EXIBIÇÃO DE ACORDO COM A ABA SELECIONADA ---
         if aba_selecionada == "📊 Dashboard de Visão Geral":
             df_calculo = df_excel.copy()
             hoje = pd.to_datetime(datetime.now().date())
@@ -176,13 +166,12 @@ if arquivo_excel is not None:
             st.markdown("### 📋 Lista Geral de Monitoramento")
             df_visual = df_calculo.copy()
             df_visual['Data Formatada'] = df_visual['Data de Validade'].dt.strftime('%d/%m/%Y')
-            df_visual = df_visual.sort_values(by='Dias_Para_Vencer')[['Produto', 'Código de Barras', 'Data Formatada', 'Quantidade', 'Dias_Para_Vencer']]
+            df_visual = df_visual.sort_values(by='Dias_Para_Vencer')[window_columns if 'window_columns' in locals() else ['Produto', 'Código de Barras', 'Data Formatada', 'Quantidade', 'Dias_Para_Vencer']]
             df_visual.columns = ['Produto', 'Código de Barras', 'Data de Validade', 'Qtd no Estoque', 'Dias Restantes']
             st.dataframe(df_visual, use_container_width=True, hide_index=True)
 
         elif aba_selecionada == "✏️ Gerenciador / Editor de Dados":
             st.subheader("✏️ Edição Dinâmica da Planilha")
-            st.info("💡 Como usar: Altere as células dando duplo clique. Use a última linha vazia para ADICIONAR novos produtos.")
             
             df_edit_view = df_excel.copy()
             df_edit_view['Data de Validade'] = df_edit_view['Data de Validade'].dt.strftime('%Y-%m-%d')
@@ -217,4 +206,4 @@ if arquivo_excel is not None:
     except Exception as e:
         st.error(f"Erro ao ler a tabela Excel: {e}")
 else:
-    st.info("👋 Aguardando o upload da tabela Excel (.xlsx) no Passo 2 para carregar as telas e os indicadores.")
+    st.info("👋 Aguardando o upload da tabela Excel (.xlsx) no Passo 2.")
