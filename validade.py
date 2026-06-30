@@ -40,7 +40,7 @@ h1, h2, h3, h4, h5, h6, p, span, label, .stMarkdown {
     color: #FFFFFF !important; 
 }
 
-/* 5. Corrige a cor dos textos pequenos de ajuda do upload (ex: "200MB per file") */
+/* 5. Corrige a cor dos textos pequenos de ajuda do upload */
 small, [data-testid="stWidgetMarkdownHint"] p { 
     color: #9CA3AF !important; 
 }
@@ -86,7 +86,7 @@ st.title("🛡️ Central de Validades e Estoque")
 st.caption("Gerenciamento dinâmico e monitoramento de lotes via planilha")
 st.write("---")
 
-# Navegação lateral simples
+# Navegação lateral
 aba_selecionada = st.sidebar.radio("📂 Navegação do Sistema", ["📊 Dashboard de Visão Geral", "✏️ Gerenciador / Editor de Dados"])
 
 # --- PASSO 1: CONVERSOR DE JSON PARA EXCEL ---
@@ -101,19 +101,21 @@ if arquivo_json is not None:
             linhas = []
             
             for p in lista_produtos:
+                # Coleta usando as chaves exatas mapeadas do arquivo real do cliente
                 nome = str(p.get('name', 'Produto Sem Nome')).strip()
                 codigo = str(p.get('barcode', 'Sem Código')).strip()
-                validade_crua = p.get('expiryDate', p.get('validade', ''))
                 
-                # Mapeamento e limpeza manual de quantidades
-                qtd = 0
-                for chave_qtd in ['quantity', 'amount', 'qtd', 'quantidade', 'Quantity']:
-                    if chave_qtd in p:
-                        try:
-                            qtd = int(float(p[chave_qtd]))
-                            break
-                        except:
-                            pass
+                # Captura de data corrigida (evita nulos)
+                validade_crua = p.get('expiryDate', '')
+                if not validade_crua:
+                    validade_crua = datetime.now().strftime('%Y-%m-%d')
+                
+                # Captura de quantidade corrigida (case-sensitive estrito para quantity)
+                qtd_crua = p.get('quantity', 0)
+                try:
+                    qtd = int(float(qtd_crua))
+                except:
+                    qtd = 0
                 
                 linhas.append({
                     'Produto': nome,
@@ -124,7 +126,7 @@ if arquivo_json is not None:
             
             df_converte = pd.DataFrame(linhas)
             
-            # Cria o arquivo Excel na memória do servidor para o usuário baixar
+            # Cria o arquivo Excel na memória do servidor
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                 df_converte.to_excel(writer, index=False, sheet_name='Validades')
@@ -147,19 +149,12 @@ arquivo_excel = st.file_uploader("📥 Envie a tabela Excel convertida (.xlsx) p
 
 if arquivo_excel is not None:
     try:
-        # Lê o Excel garantindo as tipagens corretas
+        # Lê o Excel mantendo os tipos originais intactos
         df_excel = pd.read_excel(arquivo_excel)
         
-        # Garante colunas mínimas e preenchimento
-        if 'Quantidade' in df_excel.columns:
-            df_excel['Quantidade'] = pd.to_numeric(df_excel['Quantidade'], errors='coerce').fillna(0).astype(int)
-        else:
-            df_excel['Quantidade'] = 0
-            
-        if 'Data de Validade' in df_excel.columns:
-            df_excel['Data de Validade'] = pd.to_datetime(df_excel['Data de Validade'], errors='coerce')
-        else:
-            df_excel['Data de Validade'] = pd.to_datetime(datetime.now().date())
+        # Converte as colunas para os tipos corretos de exibição e cálculo
+        df_excel['Quantidade'] = pd.to_numeric(df_excel['Quantidade'], errors='coerce').fillna(0).astype(int)
+        df_excel['Data de Validade'] = pd.to_datetime(df_excel['Data de Validade'], errors='coerce')
 
         # --- EXIBIÇÃO DE ACORDO COM A ABA SELECIONADA ---
         if aba_selecionada == "📊 Dashboard de Visão Geral":
@@ -190,7 +185,6 @@ if arquivo_excel is not None:
             st.subheader("✏️ Edição Dinâmica da Planilha")
             st.info("💡 Como usar: Altere as células dando duplo clique. Use a última linha vazia para ADICIONAR novos produtos.")
             
-            # Formata a data para texto simples para facilitar a edição pelo usuário
             df_edit_view = df_excel.copy()
             df_edit_view['Data de Validade'] = df_edit_view['Data de Validade'].dt.strftime('%Y-%m-%d')
 
@@ -210,7 +204,6 @@ if arquivo_excel is not None:
             st.write("---")
             st.subheader("💾 Salvar Planilha Atualizada")
             
-            # Permite re-exportar em Excel direto
             buffer_salvar = io.BytesIO()
             with pd.ExcelWriter(buffer_salvar, engine='openpyxl') as writer:
                 df_editado.to_excel(writer, index=False, sheet_name='Validades')
