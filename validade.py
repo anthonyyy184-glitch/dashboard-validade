@@ -1,48 +1,60 @@
 import streamlit as st
 import pandas as pd
-import json
 
-st.set_page_config(page_title="Validades", layout="wide")
-st.title("📦 Teste de Soma por Etapas")
+st.set_page_config(page_title="Coletor de Validades", layout="wide")
 
-# ETAPA 1: Upload
-arquivo_subido = st.file_uploader("Suba o seu arquivo JSON original do coletor aqui", type=["json"])
+st.title("📲 Coletor de Estoque & Validades Digital")
+st.markdown("Bipe ou altere as quantidades diretamente na tabela abaixo.")
 
-if arquivo_subido is not None:
-    try:
-        dados = json.load(arquivo_subido)
-        df_bruto = pd.DataFrame(dados['products'])
+# Inicializa o estoque na memória
+if 'estoque' not in st.session_state:
+    st.session_state.estoque = pd.DataFrame(columns=['Produto', 'Código de Barras', 'Data de Validade', 'Quantidade'])
+
+# --- ÁREA DE BIPAGEM ---
+with st.form(key='formulario_bipagem', clear_on_submit=True):
+    codigo_bipado = st.text_input("Bipe o Código de Barras aqui:", key="input_codigo")
+    botao_enviar = st.form_submit_form_button("Adicionar Produto")
+
+if botao_enviar and codigo_bipado:
+    codigo_limpo = str(codigo_bipado).strip()
+    
+    if codigo_limpo != "":
+        df_atual = st.session_state.estoque
         
-        # Limpa textos e garante que a contagem base seja 1 por linha
-        df_bruto['barcode'] = df_bruto['barcode'].astype(str).str.strip()
-        df_bruto['name'] = df_bruto['name'].astype(str).str.strip()
-        df_bruto['quantity'] = 1  # Força cada linha do coletor a valer 1 item
-        
-        st.subheader("📋 Etapa 1: Dados Brutos do Coletor")
-        st.write(f"O coletor enviou um total de **{len(df_bruto)}** linhas de bipes.")
-        st.dataframe(df_bruto[['name', 'barcode', 'quantity']], use_container_width=True)
-        
-        st.markdown("---")
-        st.subheader("🧮 Etapa 2: Unificação")
-        st.write("Clique no botão abaixo para ver o Python caçar as linhas repetidas e somar:")
-        
-        if st.button("Somar e Agrupar Agora", type="primary"):
-            # Agrupa e conta quantas vezes o código de barras se repete
-            df_unificado = df_bruto.groupby('barcode').agg({
-                'name': 'first',
-                'quantity': 'sum'  # Conta quantos bipes idênticos foram feitos
-            }).reset_index()
-            
-            df_final = df_unificado.rename(columns={
-                'name': 'Produto',
-                'barcode': 'Código de Barras',
-                'quantity': 'Quantidade'
-            })
-            df_final['Data de Validade'] = ''
-            df_final = df_final[['Produto', 'Código de Barras', 'Data de Validade', 'Quantidade']]
-            
-            st.success(f"Feito! As {len(df_bruto)} linhas viraram {len(df_final)} produtos únicos.")
-            st.dataframe(df_final, use_container_width=True, hide_index=True)
-            
-    except Exception as e:
-        st.error(f"Erro: {e}")
+        if codigo_limpo in df_atual['Código de Barras'].values:
+            # Se já existe, soma +1 em cima do valor que estiver lá (mesmo se ela alterou na mão)
+            st.session_state.estoque.loc[df_atual['Código de Barras'] == codigo_limpo, 'Quantidade'] += 1
+            st.toast(f"Código {codigo_limpo} já estava na lista. Somado +1!", icon="➕")
+        else:
+            # Produto novo começa com 1
+            nova_linha = pd.DataFrame([{
+                'Produto': f'Produto Novo ({codigo_limpo})',
+                'Código de Barras': codigo_limpo,
+                'Data de Validade': '',
+                'Quantidade': 1
+            }])
+            st.session_state.estoque = pd.concat([df_atual, nova_linha], ignore_index=True)
+            st.toast(f"Novo código {codigo_limpo} adicionado!", icon="✨")
+
+st.markdown("---")
+
+# --- TABELA EDITÁVEL ---
+st.subheader("📋 Estoque em Tempo Real (Clique para alterar o que quiser)")
+
+if not st.session_state.estoque.empty:
+    # O st.data_editor permite alterar Nome, Validade E Quantidade direto na célula!
+    estoque_editado = st.data_editor(
+        st.session_state.estoque,
+        use_container_width=True,
+        hide_index=True,
+        num_rows="dynamic"
+    )
+    
+    # Garante que as alterações manuais (como digitar 30) fiquem salvas
+    st.session_state.estoque = estoque_editado
+
+    if st.button("🗑 Limpar Todo o Estoque"):
+        st.session_state.estoque = pd.DataFrame(columns=['Produto', 'Código de Barras', 'Data de Validade', 'Quantidade'])
+        st.rerun()
+else:
+    st.info("Aguardando o primeiro bipe...")
