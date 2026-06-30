@@ -92,62 +92,58 @@ st.sidebar.write("---")
 
 # --- CARGA DE DADOS NA BARRA LATERAL ---
 st.sidebar.markdown("## 🔄 Carga de Dados")
+arquivo_subido = st.sidebar.file_uploader("📥 Upload do JSON do App de Validade", type=["json"])
 
-# Função callback que processa e tranca os dados na sessão assim que o arquivo é subido
-def processar_arquivo():
-    if st.session_state['uploader_json'] is not None:
-        try:
-            dados = json.load(st.session_state['uploader_json'])
-            if 'products' in dados:
-                df_cru = pd.DataFrame(dados['products'])
-                df_limpo = pd.DataFrame()
+# FLUXO DIRETO: Se o usuário subiu um arquivo, processamos imediatamente no corpo do script
+if arquivo_subido is not None:
+    try:
+        dados = json.load(arquivo_subido)
+        if 'products' in dados:
+            df_cru = pd.DataFrame(dados['products'])
+            df_limpo = pd.DataFrame()
+            
+            # Nome do Produto
+            if 'name' in df_cru.columns:
+                df_limpo['name'] = df_cru['name'].astype(str).str.strip()
+            else:
+                df_limpo['name'] = "Produto Sem Nome"
                 
-                # Mapeamento do Nome do Produto
-                if 'name' in df_cru.columns:
-                    df_limpo['name'] = df_cru['name'].astype(str).str.strip()
-                else:
-                    df_limpo['name'] = "Produto Sem Nome"
-                    
-                # Mapeamento do Código de Barras
-                if 'barcode' in df_cru.columns:
-                    df_limpo['barcode'] = df_cru['barcode'].astype(str).str.strip()
-                else:
-                    df_limpo['barcode'] = "Sem Código"
-                    
-                # Mapeamento da Data de Validade
-                if 'expiryDate' in df_cru.columns:
-                    df_limpo['expiryDate'] = pd.to_datetime(df_cru['expiryDate'], errors='coerce').dt.strftime('%Y-%m-%dT00:00:00.000')
-                elif 'validade' in df_cru.columns:
-                    df_limpo['expiryDate'] = pd.to_datetime(df_cru['validade'], errors='coerce').dt.strftime('%Y-%m-%dT00:00:00.000')
-                else:
-                    df_limpo['expiryDate'] = datetime.now().strftime('%Y-%m-%dT00:00:00.000')
-                    
-                # Mapeamento robusto de quantidade (procura todas as variações possíveis)
-                coluna_qtd = None
-                for col in ['quantity', 'amount', 'qtd', 'quantidade', 'Quantity', 'Amount']:
-                    if col in df_cru.columns:
-                        coluna_qtd = col
-                        break
+            # Código de Barras
+            if 'barcode' in df_cru.columns:
+                df_limpo['barcode'] = df_cru['barcode'].astype(str).str.strip()
+            else:
+                df_limpo['barcode'] = "Sem Código"
                 
-                if coluna_qtd:
-                    df_limpo['quantity'] = pd.to_numeric(df_cru[coluna_qtd], errors='coerce').fillna(0).astype(int)
-                else:
-                    df_limpo['quantity'] = 0
+            # Data de Validade
+            if 'expiryDate' in df_cru.columns:
+                df_limpo['expiryDate'] = pd.to_datetime(df_cru['expiryDate'], errors='coerce').dt.strftime('%Y-%m-%dT00:00:00.000')
+            elif 'validade' in df_cru.columns:
+                df_limpo['expiryDate'] = pd.to_datetime(df_cru['validade'], errors='coerce').dt.strftime('%Y-%m-%dT00:00:00.000')
+            else:
+                df_limpo['expiryDate'] = datetime.now().strftime('%Y-%m-%dT00:00:00.000')
                 
-                # Guarda os dados processados no estado global estável da sessão
-                st.session_state['df_produtos'] = df_limpo
-        except Exception as e:
-            st.sidebar.error(f"❌ Erro ao processar o arquivo: {e}")
+            # Quantidade (Mapeia variações de colunas)
+            coluna_qtd = None
+            for col in ['quantity', 'amount', 'qtd', 'quantidade', 'Quantity', 'Amount']:
+                if col in df_cru.columns:
+                    coluna_qtd = col
+                    break
+            
+            if coluna_qtd:
+                df_limpo['quantity'] = pd.to_numeric(df_cru[coluna_qtd], errors='coerce').fillna(0).astype(int)
+            else:
+                df_limpo['quantity'] = 0
+            
+            # Força o st.session_state a manter a versão mais fresca e atualizada dos dados
+            st.session_state['df_produtos'] = df_limpo
+    except Exception as e:
+        st.sidebar.error(f"❌ Erro ao ler arquivo: {e}")
 
-# Renderiza o botão de upload amarrado à função de callback estável
-arquivo_subido = st.sidebar.file_uploader(
-    "📥 Upload do JSON do App de Validade", 
-    type=["json"], 
-    key="uploader_json", 
-    on_change=processar_arquivo
-)
+# Se o usuário limpou o uploader do site, removemos os dados salvos para resetar o painel
+if arquivo_subido is None and 'df_produtos' in st.session_state:
+    del st.session_state['df_produtos']
 
-# --- CONTEÚDO PRINCIPAL ---
+# --- CONTEÚDO PRINCIPAL (RENDERIZAÇÃO) ---
 if 'df_produtos' in st.session_state:
     df_atual = st.session_state['df_produtos']
 
