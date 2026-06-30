@@ -1,41 +1,52 @@
 import streamlit as st
 import pandas as pd
-import json
 
-st.title("Conversor de JSON para Estoque")
+st.title("Painel de Validades")
 
-# 1. Cria o campo de upload no Streamlit
-arquivo_subido = st.file_uploader("Arraste ou selecione seu arquivo JSON aqui", type=["json"])
+# 1. Cria o campo de upload no Streamlit aceitando CSV ou Excel
+arquivo_subido = st.file_uploader("Arraste ou selecione seu arquivo CSV aqui", type=["csv", "xlsx"])
 
 if arquivo_subido is not None:
-    # 2. Carrega os dados diretamente do arquivo que você subiu na tela
-    dados = json.load(arquivo_subido)
+    try:
+        # 2. Lê o arquivo carregado (como CSV)
+        df_bruto = pd.read_csv(arquivo_subido)
+        
+        # Se o CSV vier com uma coluna de índice sem nome (ex: coluna 0, 1, 2...), removemos ela
+        if df_bruto.columns[0] == "" or "Unnamed" in df_bruto.columns[0]:
+            df_bruto = df_bruto.iloc[:, 1:]
 
-    # 3. Transforma a lista de produtos em um DataFrame do Pandas
-    df_bruto = pd.DataFrame(dados['products'])
+        # 3. Garante que as colunas necessárias existem
+        colunas_necessarias = ['Produto', 'Código de Barras', 'Quantidade']
+        
+        # Pequeno ajuste caso os nomes das colunas estejam ligeiramente diferentes
+        # Mapeia colunas conhecidas para o padrão interno
+        mapeamento = {
+            'name': 'Produto',
+            'barcode': 'Código de Barras',
+            'quantity': 'Quantidade',
+            'name ': 'Produto',
+            'barcode ': 'Código de Barras'
+        }
+        df_bruto = df_bruto.rename(columns=mapeamento)
 
-    # 4. Mágica do agrupamento: Contar quantas vezes cada código de barras aparece
-    df_contagem = df_bruto.groupby('barcode').size().reset_index(name='Quantidade')
+        # 4. Cria a coluna de Data de Validade se ela não existir ou estiver vazia
+        if 'Data de Validade' not in df_bruto.columns:
+            df_bruto['Data de Validade'] = ''
+        else:
+            # Preenche valores nulos com texto vazio para ficar limpo na tela
+            df_bruto['Data de Validade'] = df_bruto['Data de Validade'].fillna('')
 
-    # 5. Pegar os nomes dos produtos (removendo as duplicatas para não repetir)
-    df_nomes = df_bruto[['barcode', 'name']].drop_duplicates(subset=['barcode'])
+        # 5. Organiza a ordem das colunas para exibição
+        df_final = df_bruto[['Produto', 'Código de Barras', 'Data de Validade', 'Quantidade']]
 
-    # 6. Juntar o nome do produto com a quantidade certa que contamos
-    df_final = pd.merge(df_nomes, df_contagem, on='barcode')
+        # 6. Mostra o resultado final na tela
+        st.write("### Dados Carregados com Sucesso!")
+        st.dataframe(df_final)
+        
+        st.success(f"Total de {len(df_final)} itens carregados prontos para validação.")
 
-    # 7. Renomear as colunas para o padrão
-    df_final = df_final.rename(columns={
-        'name': 'Produto',
-        'barcode': 'Código de Barras'
-    })
-
-    # 8. Adiciona a coluna de validade vazia e organiza
-    df_final['Data de Validade'] = ''
-    df_final = df_final[['Produto', 'Código de Barras', 'Data de Validade', 'Quantidade']]
-
-    # Mostra o resultado na tela do Streamlit para você ver se deu certo!
-    st.write("### Dados Convertidos com Sucesso!")
-    st.dataframe(df_final)
+    except Exception as e:
+        st.error(f"Erro ao processar o arquivo: {e}")
     
 else:
-    st.info("Aguardando o upload do arquivo JSON para começar...")
+    st.info("Aguardando o upload do arquivo de exportação para começar...")
