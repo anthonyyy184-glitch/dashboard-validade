@@ -94,58 +94,72 @@ st.sidebar.write("---")
 st.sidebar.markdown("## 🔄 Carga de Dados")
 arquivo_subido = st.sidebar.file_uploader("📥 Upload do JSON do App de Validade", type=["json"])
 
-# FLUXO DIRETO: Se o usuário subiu um arquivo, processamos imediatamente no corpo do script
+# ETAPA 1: LEITURA ISOLADA DO ARQUIVO (SÓ RODA QUANDO UM ARQUIVO NOVO ENTRA)
 if arquivo_subido is not None:
-    try:
-        dados = json.load(arquivo_subido)
-        if 'products' in dados:
-            df_cru = pd.DataFrame(dados['products'])
-            df_limpo = pd.DataFrame()
-            
-            # Nome do Produto
-            if 'name' in df_cru.columns:
-                df_limpo['name'] = df_cru['name'].astype(str).str.strip()
-            else:
-                df_limpo['name'] = "Produto Sem Nome"
+    # Criamos uma chave para identificar se o arquivo atual já foi processado
+    nome_arquivo_atual = arquivo_subido.name
+    
+    if st.session_state.get('ultimo_arquivo_carregado') != nome_arquivo_atual:
+        try:
+            dados = json.load(arquivo_subido)
+            if 'products' in dados:
+                df_cru = pd.DataFrame(dados['products'])
+                df_limpo = pd.DataFrame()
                 
-            # Código de Barras
-            if 'barcode' in df_cru.columns:
-                df_limpo['barcode'] = df_cru['barcode'].astype(str).str.strip()
-            else:
-                df_limpo['barcode'] = "Sem Código"
+                # Nome do Produto
+                if 'name' in df_cru.columns:
+                    df_limpo['name'] = df_cru['name'].astype(str).str.strip()
+                else:
+                    df_limpo['name'] = "Produto Sem Nome"
+                    
+                # Código de Barras
+                if 'barcode' in df_cru.columns:
+                    df_limpo['barcode'] = df_cru['barcode'].astype(str).str.strip()
+                else:
+                    df_limpo['barcode'] = "Sem Código"
+                    
+                # Data de Validade
+                if 'expiryDate' in df_cru.columns:
+                    df_limpo['expiryDate'] = pd.to_datetime(df_cru['expiryDate'], errors='coerce').dt.strftime('%Y-%m-%dT00:00:00.000')
+                elif 'validade' in df_cru.columns:
+                    df_limpo['expiryDate'] = pd.to_datetime(df_cru['validade'], errors='coerce').dt.strftime('%Y-%m-%dT00:00:00.000')
+                else:
+                    df_limpo['expiryDate'] = datetime.now().strftime('%Y-%m-%dT00:00:00.000')
+                    
+                # Quantidade (Mapeia variações de colunas diretamente)
+                coluna_qtd = None
+                for col in ['quantity', 'amount', 'qtd', 'quantidade', 'Quantity', 'Amount']:
+                    if col in df_cru.columns:
+                        coluna_qtd = col
+                        break
                 
-            # Data de Validade
-            if 'expiryDate' in df_cru.columns:
-                df_limpo['expiryDate'] = pd.to_datetime(df_cru['expiryDate'], errors='coerce').dt.strftime('%Y-%m-%dT00:00:00.000')
-            elif 'validade' in df_cru.columns:
-                df_limpo['expiryDate'] = pd.to_datetime(df_cru['validade'], errors='coerce').dt.strftime('%Y-%m-%dT00:00:00.000')
-            else:
-                df_limpo['expiryDate'] = datetime.now().strftime('%Y-%m-%dT00:00:00.000')
+                if coluna_qtd:
+                    df_limpo['quantity'] = pd.to_numeric(df_cru[coluna_qtd], errors='coerce').fillna(0).astype(int)
+                else:
+                    df_limpo['quantity'] = 0
                 
-            # Quantidade (Mapeia variações de colunas)
-            coluna_qtd = None
-            for col in ['quantity', 'amount', 'qtd', 'quantidade', 'Quantity', 'Amount']:
-                if col in df_cru.columns:
-                    coluna_qtd = col
-                    break
-            
-            if coluna_qtd:
-                df_limpo['quantity'] = pd.to_numeric(df_cru[coluna_qtd], errors='coerce').fillna(0).astype(int)
-            else:
-                df_limpo['quantity'] = 0
-            
-            # Força o st.session_state a manter a versão mais fresca e atualizada dos dados
-            st.session_state['df_produtos'] = df_limpo
-    except Exception as e:
-        st.sidebar.error(f"❌ Erro ao ler arquivo: {e}")
+                # Salvamos os dados puros originais e atualizamos a marcação do arquivo
+                st.session_state['df_original'] = df_limpo
+                st.session_state['df_editado'] = df_limpo.copy()  # Inicializa o editado igual ao original
+                st.session_state['ultimo_arquivo_carregado'] = nome_arquivo_atual
+        except Exception as e:
+            st.sidebar.error(f"❌ Erro ao ler arquivo: {e}")
 
-# Se o usuário limpou o uploader do site, removemos os dados salvos para resetar o painel
-if arquivo_subido is None and 'df_produtos' in st.session_state:
-    del st.session_state['df_produtos']
+# Se o uploader for limpo, deleta tudo da memória para dar reset
+if arquivo_subido is None:
+    if 'df_original' in st.session_state: del st.session_state['df_original']
+    if 'df_editado' in st.session_state: del st.session_state['df_editado']
+    if 'ultimo_arquivo_carregado' in st.session_state: del st.session_state['ultimo_arquivo_carregado']
 
-# --- CONTEÚDO PRINCIPAL (RENDERIZAÇÃO) ---
-if 'df_produtos' in st.session_state:
-    df_atual = st.session_state['df_produtos']
+# ETAPA 2: DEFINIÇÃO DE QUAL FONTE DE DADOS EXIBIR
+df_atual = None
+if 'df_editado' in st.session_state:
+    df_atual = st.session_state['df_editado']
+elif 'df_original' in st.session_state:
+    df_atual = st.session_state['df_original']
+
+# --- RENDERIZAÇÃO DAS ETAPAS NA TELA ---
+if df_atual is not None:
 
     # ABA 1: VISUALIZAÇÃO E ESTATÍSTICAS
     if aba_selecionada == "📊 Dashboard de Visão Geral":
@@ -156,7 +170,6 @@ if 'df_produtos' in st.session_state:
 
         col1, col2, col3, col4 = st.columns(4)
         
-        # Filtros de soma utilizando as quantidades reais do estoque
         vencidos = df_calculo[df_calculo['Dias_Para_Vencer'] < 0]['quantity'].sum()
         critico = df_calculo[(df_calculo['Dias_Para_Vencer'] >= 0) & (df_calculo['Dias_Para_Vencer'] <= 7)]['quantity'].sum()
         atencao = df_calculo[(df_calculo['Dias_Para_Vencer'] > 7) & (df_calculo['Dias_Para_Vencer'] <= 30)]['quantity'].sum()
@@ -179,7 +192,8 @@ if 'df_produtos' in st.session_state:
         st.subheader("✏️ Edição Dinâmica do Banco de Dados")
         st.info("💡 Como usar: Dê duplo clique em qualquer célula para alterar o texto/quantidade. Para deletar uma linha, selecione-a e aperte 'Delete' no seu teclado. Use a última linha vazia para ADICIONAR novos produtos.")
         
-        df_editado = st.data_editor(
+        # O editor agora recebe os dados e salva estritamente em uma caixinha separada
+        df_retorno_editor = st.data_editor(
             df_atual,
             column_config={
                 "name": st.column_config.TextColumn("Nome do Produto", required=True, width="medium"),
@@ -192,13 +206,14 @@ if 'df_produtos' in st.session_state:
             hide_index=True
         )
 
-        st.session_state['df_produtos'] = df_editado
+        # Tranca as alterações na etapa de edição separada
+        st.session_state['df_editado'] = df_retorno_editor
 
         st.write("---")
         st.subheader("💾 Exportar e Salvar Novo Arquivo")
         
         if st.button("🔄 Estruturar e Gerar Novo JSON"):
-            lista_produtos = df_editado.to_dict(orient='records')
+            lista_produtos = df_retorno_editor.to_dict(orient='records')
             json_final = {"products": lista_produtos}
             json_string = json.dumps(json_final, indent=2, ensure_ascii=False)
             
