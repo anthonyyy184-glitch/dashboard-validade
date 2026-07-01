@@ -1,155 +1,123 @@
 import streamlit as st
 import pandas as pd
 import json
+import io
 from datetime import datetime
 
-# Configuração da página profissional e larga
-st.set_page_config(page_title="Auditor de Validades", layout="wide")
+st.set_page_config(page_title="Conversor Reverso de Validades", layout="wide")
 
-st.title("🛡️ Auditor & Controlador de Validades Inteligente")
-st.markdown("Suba o JSON do coletor, compare com o histórico e gerencie seu estoque por categorias.")
+st.title("🔄 Conversor Reverso de Estoque & Validades")
+st.markdown("Interface dividida em duas etapas independentes para garantir a precisão total dos dados.")
 
-# 1. Inicializa os bancos de dados na memória do navegador
-if 'estoque_atual' not in st.session_state:
-    st.session_state.estoque_atual = None
+# Criando as duas abas na tela principal
+aba_explosao, aba_consolidacao = st.tabs(["💥 Passo 1: Explodir JSON", "🧮 Passo 2: Consolidar & Somar"])
 
 # ==========================================
-#          BARRA LATERAL (SIDEBAR)
+#        ABA 1: EXPLODIR O JSON BRUTO
 # ==========================================
-with st.sidebar:
-    st.header("📂 1. Base Histórica (Excel)")
-    arquivo_excel = st.file_uploader("Suba o Excel salvo do mês/semana anterior (Opcional)", type=["xlsx", "csv"])
+with aba_explosao:
+    st.header("1️⃣ Gerar Excel Desagregado (Linha por Linha)")
+    st.markdown("Suba o JSON do coletor aqui. Se um produto tiver quantidade **16**, o sistema vai criar **16 linhas** dele no Excel.")
     
-    st.header("📲 2. Coleta Nova (JSON)")
-    arquivo_json = st.file_uploader("Arraste o arquivo JSON atual do coletor aqui", type=["json"])
+    json_bruto = st.file_uploader("Arraste o arquivo JSON do coletor aqui", type=["json"], key="uploader_json")
     
-    st.markdown("---")
-    if st.button("🗑️ Resetar Painel / Novo Inventário"):
-        st.session_state.estoque_atual = None
-        st.rerun()
-
-# ==========================================
-#        LÓGICA DE PROCESSAMENTO & COMPARAÇÃO
-# ==========================================
-if arquivo_json is not None and st.session_state.estoque_atual is None:
-    try:
-        # Carrega o JSON novo do coletor
-        dados = json.load(arquivo_json)
-        lista_produtos = dados.get('products', dados) if isinstance(dados, dict) else dados
-        
-        novos_itens = []
-        for item in lista_produtos:
-            novos_itens.append({
-                'Produto': str(item.get('name', 'S/ NOME')).strip(),
-                'Código de Barras': str(item.get('barcode', 'S/ CÓDIGO')).strip(),
-                'Data de Validade': '',
-                'Quantidade': int(item.get('quantity', 1)),
-                'Status': 'Novo no Coletor'  # Status padrão inicial
-            })
-        df_novo = pd.DataFrame(novos_itens)
-
-        # Se ela subiu um Excel antigo para comparar...
-        if arquivo_excel is not None:
-            try:
-                if arquivo_excel.name.endswith('.xlsx'):
-                    df_antigo = pd.read_excel(arquivo_excel)
-                else:
-                    df_antigo = pd.read_csv(arquivo_excel)
-                
-                # Garante que a chave de busca seja texto limpo
-                df_antigo['Código de Barras'] = df_antigo['Código de Barras'].astype(str).str.strip()
-                
-                # Mapeia as validades antigas para os produtos novos não virem em branco
-                mapeamento_validade = dict(zip(df_antigo['Código de Barras'], df_antigo['Data de Validade']))
-                mapeamento_qtd = dict(zip(df_antigo['Código de Barras'], df_antigo['Quantidade']))
-                
-                for idx, row in df_novo.iterrows():
-                    cb = row['Código de Barras']
-                    if cb in mapeamento_validade:
-                        df_novo.at[idx, 'Data de Validade'] = mapeamento_validade[cb]
-                        df_novo.at[idx, 'Quantidade'] = mapeamento_qtd[cb]
-                        df_novo.at[idx, 'Status'] = 'Já Existia'
-            except Exception as e:
-                st.warning(f"Não consegui ler o Excel antigo para comparar, mostrando apenas o JSON. Erro: {e}")
-
-        st.session_state.estoque_atual = df_novo
-
-    except Exception as e:
-        st.error(f"Erro ao processar os arquivos: {e}")
-
-# ==========================================
-#          PAINEL PRINCIPAL (INTERFACES E ABAS)
-# ==========================================
-if st.session_state.estoque_atual is not None:
-    df_trabalho = st.session_state.estoque_atual.copy()
-
-    # --- FUNÇÃO DE SEPARAÇÃO POR CATEGORIAS (Sua ideia de organização) ---
-    def definir_categoria(nome):
-        nome_lower = nome.lower()
-        if any(x in nome_lower for x in ['iogurte', 'iog', 'leite', 'danone', 'carolina', 'unibaby', 'batavo', 'requeijao', 'nata']):
-            return '🥛 Laticínios & Iogurtes'
-        elif any(x in nome_lower for x in ['pao', 'pão', 'bisnag', 'torrada', 'brioche', 'forma', 'seven boys', 'wickbold', 'pullman']):
-            return '🍞 Panificação & Pães'
-        else:
-            return '📦 Outros Produtos'
-
-    df_trabalho['Categoria'] = df_trabalho['Produto'].apply(definir_categoria)
-
-    # --- FUNÇÃO DE CORES (Sua ideia visual de legibilidade + Alerta) ---
-    def estilizar_tabela(row):
-        estilos = [''] * len(row)
-        # Se for um item novo detectado pelo comparador -> Fundo Verde Claro
-        if row['Status'] == 'Novo no Coletor':
-            return ['background-color: #d4edda; color: #155724; font-weight: bold'] * len(row)
-        
-        # Alerta Extra: Se tiver validade preenchida e estiver vencendo (Exemplo fictício de lógica)
-        val = str(row['Data de Validade']).strip()
-        if val and ('/06/' in val or '/2026' in val):  # Filtro simples para o exemplo
-            return ['background-color: #f8d7da; color: #721c24;'] * len(row)
+    if json_bruto is not None:
+        try:
+            dados = json.load(json_bruto)
+            lista_produtos = dados.get('products', dados) if isinstance(dados, dict) else dados
             
-        return estilos
-
-    # Criando as abas dinâmicas na tela
-    categorias_unicas = sorted(df_trabalho['Categoria'].unique())
-    abas = st.tabs(categorias_unicas)
-
-    for i, cat in enumerate(categorias_unicas):
-        with abas[i]:
-            st.markdown(f"### Gerenciamento de {cat}")
-            df_filtrado = df_trabalho[df_trabalho['Categoria'] == cat].drop(columns=['Categoria'])
+            linhas_explodidas = []
             
-            # Excel interativo na tela
-            dados_editados = st.data_editor(
-                df_filtrado,
-                use_container_width=True,
-                hide_index=True,
-                key=f"editor_{cat}"
+            for item in lista_produtos:
+                nome = str(item.get('name', 'S/ NOME')).strip()
+                codigo = str(item.get('barcode', 'S/ CÓDIGO')).strip()
+                # Pega a quantidade que está no arquivo (ex: 16)
+                qtd_original = int(item.get('quantity', 1))
+                
+                # REPETIÇÃO FORÇADA: Roda um loop para criar X linhas físicas na planilha
+                for _ in range(qtd_original):
+                    linhas_explodidas.append({
+                        'Produto': nome,
+                        'Código de Barras': codigo,
+                        'Data de Validade': '' # Deixa em branco para preencher no Excel se quiser
+                    })
+            
+            df_explodido = pd.DataFrame(linhas_explodidas)
+            
+            st.success(f"🎉 Sucesso! O arquivo JSON foi transformado em uma planilha com {len(df_explodido)} linhas totais.")
+            st.dataframe(df_explodido, use_container_width=True, hide_index=True)
+            
+            # Função para converter para Excel real (.xlsx)
+            def gerar_excel_bruto(df):
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df.to_excel(writer, index=False, sheet_name='Itens_Explodidos')
+                return output.getvalue()
+            
+            excel_bruto_bin = gerar_excel_bruto(df_explodido)
+            
+            st.download_button(
+                label="📥 Baixar Excel Bruto Explodido (.xlsx)",
+                data=excel_bruto_bin,
+                file_name=f"base_bruta_explodida_{datetime.now().strftime('%d-%m-%Y')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
             
-            # Atualiza o banco principal com o que ela digitou na aba específica
-            for idx, row in dados_editados.iterrows():
-                cb = row['Código de Barras']
-                st.session_state.estoque_atual.loc[st.session_state.estoque_atual['Código de Barras'] == cb, 'Data de Validade'] = row['Data de Validade']
-                st.session_state.estoque_atual.loc[st.session_state.estoque_atual['Código de Barras'] == cb, 'Quantidade'] = row['Quantidade']
+        except Exception as e:
+            st.error(f"Erro ao explodir o JSON: {e}")
 
-    # --- BOTÃO DE SALVAMENTO (Baixar o Excel Atualizado) ---
-    st.markdown("---")
-    st.subheader("💾 3. Salvar Trabalho")
-    st.markdown("Clique no botão abaixo para exportar a planilha corrigida. Guarde esse arquivo para usar como comparação no próximo inventário!")
+# ==========================================
+#        ABA 2: CONSOLIDAR E SOMAR
+# ==========================================
+with aba_consolidacao:
+    st.header("2️⃣ Somar e Unificar o Excel")
+    st.markdown("Suba o arquivo Excel (pode ser o que você baixou no Passo 1, mesmo que tenha preenchido as validades nele). O sistema vai agrupar os repetidos e fazer a soma final.")
     
-    # Converte o dataframe atualizado para formato Excel na memória para download rápido
-    @st.cache_data
-    def converter_para_excel(df):
-        return df.to_csv(index=False).encode('utf-8')
-        
-    csv_final = converter_para_excel(st.session_state.estoque_atual)
+    excel_para_somar = st.file_uploader("Suba o arquivo Excel (.xlsx) aqui", type=["xlsx"], key="uploader_excel")
     
-    st.download_button(
-        label="📥 Baixar Planilha de Validades Corrigida (.CSV / Excel)",
-        data=csv_final,
-        file_name=f"inventario_validades_{datetime.now().strftime('%d-%m-%Y')}.csv",
-        mime="text/csv"
-    )
+    if excel_para_somar is not None:
+        try:
+            # Lê o Excel que tem as linhas repetidas
+            df_para_agrupar = pd.read_excel(excel_para_somar)
+            
+            # Limpeza padrão de segurança
+            df_para_agrupar['Código de Barras'] = df_para_agrupar['Código de Barras'].astype(str).str.strip()
+            df_para_agrupar['Produto'] = df_para_agrupar['Produto'].astype(str).str.strip()
+            
+            # Se a coluna Data de Validade não existir, cria ela vazia
+            if 'Data de Validade' not in df_para_agrupar.columns:
+                df_para_agrupar['Data de Validade'] = ''
+            else:
+                df_para_agrupar['Data de Validade'] = df_para_agrupar['Data de Validade'].fillna('').astype(str).str.strip()
 
-else:
-    st.info("💡 Como usar: Vá na barra lateral esquerda, insira o JSON do seu coletor (e o Excel do inventário passado se tiver). O sistema montará o painel automaticamente!")
+            # MOTOR DE SOMA DEFINITIVO:
+            # Agrupa por Código de Barras E Data de Validade (assim se o mesmo pão tiver duas validades, ele gera duas linhas com as somas separadas de cada lote!)
+            df_consolidado = df_para_agrupar.groupby(['Código de Barras', 'Data de Validade']).agg({
+                'Produto': 'first', # Mantém o nome
+                'Código de Barras': 'size' # Conta quantas linhas repetidas existem (Soma 1+1+1...)
+            }).rename(columns={'Código de Barras': 'Quantidade'}).reset_index()
+            
+            # Organiza a ordem das colunas pro formato que você gosta
+            df_final = df_consolidado[['Produto', 'Código de Barras', 'Data de Validade', 'Quantidade']]
+            
+            st.success(f"🧮 Estoque unificado! As linhas duplicadas foram somadas e geraram {len(df_final)} produtos únicos.")
+            st.dataframe(df_final, use_container_width=True, hide_index=True)
+            
+            # Função para exportar o arquivo final somado
+            def gerar_excel_final(df):
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df.to_excel(writer, index=False, sheet_name='Estoque_Somado')
+                return output.getvalue()
+                
+            excel_final_bin = gerar_excel_final(df_final)
+            
+            st.download_button(
+                label="📥 Baixar Relatório de Estoque Final Somado (.xlsx)",
+                data=excel_final_bin,
+                file_name=f"relatorio_estoque_final_{datetime.now().strftime('%d-%m-%Y')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            
+        except Exception as e:
+            st.error(f"Erro ao consolidar as somas do Excel: {e}")
