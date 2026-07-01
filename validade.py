@@ -1,77 +1,57 @@
 import streamlit as st
-import pandas as pd 
+import pandas as pd
 import json
 
 st.set_page_config(page_title="Painel de Validades", layout="wide")
 
-st.title("📦 Painel de Validades & Estoque")
-st.markdown("Carregue o JSON na barra lateral. O sistema vai unificar e congelar os dados para edição.")
+st.title("📦 Conversor de Estoque (Modo Foto Estática)")
+st.markdown("Este código usa a sua lógica: processa tudo escondido e exibe uma tabela fixa que não reseta.")
 
-# 1. Inicializa a tabela definitiva na memória se ela não existir
-if 'tabela_com_soma' not in st.session_state:
-    st.session_state.tabela_com_soma = None
-
-# ==========================================
-#          BARRA LATERAL (SIDEBAR)
-# ==========================================
 with st.sidebar:
     st.header("📂 Importação")
     arquivo_subido = st.file_uploader("Arraste seu arquivo JSON aqui", type=["json"])
-    
-    # Botão para resetar o sistema se quiser subir outro arquivo
-    if st.button("🔄 Resetar e Subir Novo Arquivo"):
-        st.session_state.tabela_com_soma = None
-        st.rerun()
 
-# ==========================================
-#        LÓGICA DE CONVERSÃO ISOLADA
-# ==========================================
-# Só entra aqui se o arquivo foi subido E a tabela ainda não foi calculada
-if arquivo_subido is not None and st.session_state.tabela_com_soma is None:
+if arquivo_subido is not None:
     try:
+        # === 1. O MECANISMO ESCONDIDO (Python Puro) ===
         dados = json.load(arquivo_subido)
-        df_bruto = pd.DataFrame(dados['products'])
+        lista_produtos = dados.get('products', dados) if isinstance(dados, dict) else dados
 
-        # Limpeza radical de espaços
-        df_bruto['barcode'] = df_bruto['barcode'].astype(str).str.strip()
-        df_bruto['name'] = df_bruto['name'].astype(str).str.strip()
+        # Dicionário escondido na memória para fazer a contagem sem o Streamlit ver
+        contagem_escondida = {}
 
-        # CONTAGEM REAL: Conta quantas vezes cada código de barras aparece no JSON bruto
-        df_contagem = df_bruto.groupby('barcode').size().reset_index(name='Quantidade')
+        for item in lista_produtos:
+            codigo = str(item.get('barcode', '')).strip()
+            nome = str(item.get('name', 'Produto Sem Nome')).strip()
+            
+            if codigo and codigo != "None":
+                # Se o produto já passou por aqui, soma +1 no papelzinho escondido
+                if codigo in contagem_escondida:
+                    contagem_escondida[codigo]['Quantidade'] += 1
+                else:
+                    # Se é a primeira vez, registra com 1
+                    contagem_escondida[codigo] = {
+                        'Produto': nome,
+                        'Código de Barras': codigo,
+                        'Quantidade': 1
+                    }
+
+        # Transforma o papelzinho de contagem na tabela final
+        df_foto = pd.DataFrame(contagem_escondida.values())
         
-        # Pega o primeiro nome de cada produto para não duplicar colunas
-        df_nomes = df_bruto[['barcode', 'name']].drop_duplicates(subset=['barcode'])
+        # Cria a coluna de validade vazia
+        df_foto['Data de Validade'] = '👉 Preencher no Excel'
+        df_foto = df_foto[['Produto', 'Código de Barras', 'Data de Validade', 'Quantidade']]
+
+
+        # === 2. MOSTRAR A "FOTO" NA TELA ===
+        st.subheader("📋 Tabela Consolidada (Pronta para Cópia/Download)")
+        st.success(f"Sucesso! O mecanismo processou {len(df_foto)} produtos únicos.")
         
-        # Junta o nome com a quantidade da contagem real
-        df_processado = pd.merge(df_nomes, df_contagem, on='barcode')
-
-        # Formata colunas para o seu padrão antigo
-        df_processado = df_processado.rename(columns={'name': 'Produto', 'barcode': 'Código de Barras'})
-        df_processado['Data de Validade'] = ''
-        df_processado = df_processado[['Produto', 'Código de Barras', 'Data de Validade', 'Quantidade']]
-
-        # 🔥 SALVA NA MEMÓRIA E CONGELA. O Python não recalcula mais isso nas atualizações de tela!
-        st.session_state.tabela_com_soma = df_processado
-        st.success("🎉 Arquivo processado e quantidades somadas com sucesso!")
+        # st.table funciona como uma foto fixa. Não dá bug de reset porque ela não é editável na tela!
+        st.table(df_foto)
 
     except Exception as e:
-        st.error(f"Erro no formato do JSON: {e}")
-
-# ==========================================
-#          EXIBIÇÃO NA TELA PRINCIPAL
-# ==========================================
-if st.session_state.tabela_com_soma is not None:
-    st.subheader("📋 Tabela de Validades (Pronta para uso)")
-    
-    # Exibe o editor usando o dado congelado e seguro da memória
-    estoque_editado = st.data_editor(
-        st.session_state.tabela_com_soma,
-        use_container_width=True,
-        hide_index=True,
-        num_rows="dynamic"
-    )
-    
-    # Salva as edições de data que a cliente fizer sem quebrar a quantidade
-    st.session_state.tabela_com_soma = estoque_editado
+        st.error(f"Erro no processamento: {e}")
 else:
-    st.info("Aguardando o upload do arquivo JSON na barra lateral para gerar a tabela...")
+    st.info("Aguardando o arquivo JSON para acionar o mecanismo...")
