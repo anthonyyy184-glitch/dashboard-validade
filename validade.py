@@ -7,7 +7,7 @@ from datetime import datetime
 st.set_page_config(page_title="Conversor Reverso de Validades", layout="wide")
 
 st.title("🔄 Conversor Reverso de Estoque & Validades")
-st.markdown("Interface calibrada para o formato oficial do aplicativo de celular.")
+st.markdown("Interface calibrada com **Autodetecção Inteligente** para ler qualquer formato do seu coletor.")
 
 # Criando as duas abas na tela principal
 aba_explosao, aba_consolidacao = st.tabs(["💥 Passo 1: Explodir JSON", "🧮 Passo 2: Consolidar & Somar"])
@@ -17,7 +17,7 @@ aba_explosao, aba_consolidacao = st.tabs(["💥 Passo 1: Explodir JSON", "🧮 P
 # ==========================================
 with aba_explosao:
     st.header("1️⃣ Gerar Excel Desagregado (Linha por Linha)")
-    st.markdown("Suba o JSON do coletor aqui para multiplicar as linhas com base nas quantidades e validades reais do app.")
+    st.markdown("Suba o JSON do coletor aqui. O sistema vai rastrear as quantidades e multiplicar as linhas.")
     
     json_bruto = st.file_uploader("Arraste o arquivo JSON do coletor aqui", type=["json"], key="uploader_json")
     
@@ -25,11 +25,31 @@ with aba_explosao:
         try:
             dados = json.load(json_bruto)
             
-            # 🛠️ CORREÇÃO DO NOME DA TABELA: No BeSmart se chama 'products' e 'expiry_products'
-            lista_produtos = dados.get('products', [])
-            lista_itens = dados.get('expiry_products', [])
+            # 🛠️ A SOLUÇÃO DEFINITIVA: AUTODETECÇÃO DE TABELAS
+            # O Python vai caçar os dados pelo que eles são, não pelo nome da chave!
+            lista_produtos = []
+            lista_itens = []
             
-            # Cria o mapa para achar o Nome do produto pelo Código de Barras
+            if isinstance(dados, dict):
+                for chave, valor in dados.items():
+                    if isinstance(valor, list) and len(valor) > 0:
+                        amostra = valor[0]
+                        if isinstance(amostra, dict):
+                            # Se tem 'name', guarda na base de produtos
+                            if 'name' in amostra:
+                                lista_produtos.extend(valor)
+                            # Se tem 'quantity' ou 'expiryDate', guarda na base de lotes/quantidades reais
+                            if 'quantity' in amostra or 'expiryDate' in amostra or 'storeId' in amostra:
+                                lista_itens.extend(valor)
+            elif isinstance(dados, list):
+                lista_produtos = dados
+                lista_itens = dados
+            
+            # Fallback de segurança
+            if not lista_itens and lista_produtos:
+                lista_itens = lista_produtos
+
+            # Mapa ultra-rápido para cruzar o código de barras com o nome correto
             mapa_nomes = {}
             for p in lista_produtos:
                 cb = str(p.get('barcode', '')).strip()
@@ -38,47 +58,45 @@ with aba_explosao:
             
             linhas_explodidas = []
             
-            # Varre a tabela certa de validades e quantidades
+            # Varre os itens rastreados
             for item in lista_itens:
                 codigo = str(item.get('barcode', '')).strip()
-                if not codigo:
+                if not codigo or codigo == "None":
                     continue
                     
-                nome = mapa_nomes.get(codigo, f"Produto ({codigo})")
+                nome = mapa_nomes.get(codigo, str(item.get('name', f"Produto ({codigo})")).strip())
                 
-                # Pega a data de validade original do celular e formata para o padrão BR (DD/MM/AAAA)
+                # Tratamento Inteligente de Data: Se o app manda 2026-07-16, vira 16/07/2026
                 data_original = item.get('expiryDate', '')
                 data_formatada = ''
-                if data_original:
+                if data_original and str(data_original) != "None":
                     try:
-                        # Corta o texto para pegar só a data YYYY-MM-DD
                         data_limpa = data_original.split('T')[0]
                         dt = datetime.strptime(data_limpa, '%Y-%m-%d')
                         data_formatada = dt.strftime('%d/%m/%Y')
                     except:
                         data_formatada = str(data_original)
 
-                # Garante que a quantidade seja um número inteiro
+                # Tratamento da Quantidade (para não travar e explodir a quantia certa)
                 try:
                     qtd_original = int(float(item.get('quantity', 1)))
                 except:
                     qtd_original = 1
                 
-                # REPETIÇÃO FORÇADA: Se o produto tem quantidade 7, cria 7 linhas físicas
+                # 🔥 O MOTOR DE EXPLOSÃO: O Danone tá com 7? Ele gera 7 linhas idênticas!
                 for _ in range(qtd_original):
                     linhas_explodidas.append({
                         'Produto': nome,
                         'Código de Barras': codigo,
-                        'Data de Validade': data_formatada # Agora já vem preenchida do celular!
+                        'Data de Validade': data_formatada
                     })
             
             df_explodido = pd.DataFrame(linhas_explodidas)
             
             if not df_explodido.empty:
-                st.success(f"🎉 Sucesso! O arquivo foi processado. Foram geradas {len(df_explodido)} linhas no total.")
+                st.success(f"🎉 SUCESSO ABSOLUTO! O sistema rastreou os dados e gerou {len(df_explodido)} linhas.")
                 st.dataframe(df_explodido, use_container_width=True, hide_index=True)
                 
-                # Função para converter para Excel real (.xlsx)
                 def gerar_excel_bruto(df):
                     output = io.BytesIO()
                     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -94,10 +112,10 @@ with aba_explosao:
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
             else:
-                st.warning("Aviso: Chaves encontradas, mas nenhum item válido dentro delas.")
+                st.error("O arquivo foi lido, mas não encontramos produtos com código de barras válido.")
             
         except Exception as e:
-            st.error(f"Erro ao explodir o JSON: {e}")
+            st.error(f"Erro ao processar o JSON: {e}")
 
 # ==========================================
 #        ABA 2: CONSOLIDAR E SOMAR
@@ -120,13 +138,13 @@ with aba_consolidacao:
             else:
                 df_para_agrupar['Data de Validade'] = df_para_agrupar['Data de Validade'].fillna('').astype(str).str.strip()
 
-            # Agrupa por Código e Validade, e conta a quantidade de linhas físicas repetidas
-            df_consolidated = df_para_agrupar.groupby(['Código de Barras', 'Data de Validade']).agg({
+            # MOTOR DE SOMA: Agrupa os códigos e datas e soma
+            df_consolidado = df_para_agrupar.groupby(['Código de Barras', 'Data de Validade']).agg({
                 'Produto': 'first', 
                 'Código de Barras': 'size' 
             }).rename(columns={'Código de Barras': 'Quantidade'}).reset_index()
             
-            df_final = df_consolidated[['Produto', 'Código de Barras', 'Data de Validade', 'Quantidade']]
+            df_final = df_consolidado[['Produto', 'Código de Barras', 'Data de Validade', 'Quantidade']]
             
             st.success(f"🧮 Estoque unificado! As linhas duplicadas foram somadas e geraram {len(df_final)} produtos únicos.")
             st.dataframe(df_final, use_container_width=True, hide_index=True)
@@ -140,7 +158,7 @@ with aba_consolidacao:
             excel_final_bin = gerar_excel_final(df_final)
             
             st.download_button(
-                label="📥 Baixar Planilha de Estoque Final Somado (.xlsx)",
+                label="📥 Baixar Planilha de Estoque Final Somada (.xlsx)",
                 data=excel_final_bin,
                 file_name=f"relatorio_estoque_final_{datetime.now().strftime('%d-%m-%Y')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
