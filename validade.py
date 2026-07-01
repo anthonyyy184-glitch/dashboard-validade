@@ -17,55 +17,73 @@ aba_explosao, aba_consolidacao = st.tabs(["💥 Passo 1: Explodir JSON", "🧮 P
 # ==========================================
 with aba_explosao:
     st.header("1️⃣ Gerar Excel Desagregado (Linha por Linha)")
-    st.markdown("Suba o JSON do coletor aqui. Se um produto tiver quantidade **7**, o sistema vai criar **7 linhas** dele no Excel.")
+    st.markdown("Suba o JSON do coletor aqui para multiplicar as linhas com base nas quantidades reais do app.")
     
     json_bruto = st.file_uploader("Arraste o arquivo JSON do coletor aqui", type=["json"], key="uploader_json")
     
     if json_bruto is not None:
         try:
             dados = json.load(json_bruto)
-            lista_produtos = dados.get('products', dados) if isinstance(dados, dict) else dados
+            
+            # 🛠️ O PULO DO GATO: Extrai as duas tabelas do arquivo do app
+            lista_produtos = dados.get('products', [])
+            lista_itens = dados.get('items', [])
+            
+            # Cria um dicionário para achar o Nome do produto pelo Código de Barras de forma ultra rápida
+            mapa_nomes = {}
+            for p in lista_produtos:
+                cb = str(p.get('barcode', '')).strip()
+                if cb:
+                    mapa_nomes[cb] = str(p.get('name', 'S/ NOME')).strip()
             
             linhas_explodidas = []
             
-            for item in lista_produtos:
-                nome = str(item.get('name', 'S/ NOME')).strip()
-                codigo = str(item.get('barcode', 'S/ CÓDIGO')).strip()
+            # Agora varremos a tabela de ITENS (onde a quantidade real está salva!)
+            for item in lista_itens:
+                codigo = str(item.get('barcode', '')).strip()
+                if not codigo:
+                    continue
+                    
+                # Busca o nome correspondente no nosso mapa
+                nome = mapa_nomes.get(codigo, f"Produto ({codigo})")
                 
-                # 🛠️ AJUSTE DA SUA LÓGICA: Conversão ultra segura para garantir o loop correto
+                # Garante que a quantidade seja lida perfeitamente como número
                 try:
                     qtd_original = int(float(item.get('quantity', 1)))
                 except:
                     qtd_original = 1
                 
-                # REPETIÇÃO FORÇADA: Roda o loop exatamente o número de vezes da quantidade
+                # REPETIÇÃO FORÇADA: Se o Danone tem 7, cria 7 linhas físicas aqui
                 for _ in range(qtd_original):
                     linhas_explodidas.append({
                         'Produto': nome,
                         'Código de Barras': codigo,
-                        'Data de Validade': '' # Em branco para preencher no Excel
+                        'Data de Validade': '' # Pronto para o cliente preencher se quiser
                     })
             
             df_explodido = pd.DataFrame(linhas_explodidas)
             
-            st.success(f"🎉 Sucesso! O arquivo JSON foi transformado em uma planilha com {len(df_explodido)} linhas totais.")
-            st.dataframe(df_explodido, use_container_width=True, hide_index=True)
-            
-            # Função para converter para Excel real (.xlsx)
-            def gerar_excel_bruto(df):
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    df.to_excel(writer, index=False, sheet_name='Itens_Explodidos')
-                return output.getvalue()
-            
-            excel_bruto_bin = gerar_excel_bruto(df_explodido)
-            
-            st.download_button(
-                label="📥 Baixar Excel Bruto Explodido (.xlsx)",
-                data=excel_bruto_bin,
-                file_name=f"base_bruta_explodida_{datetime.now().strftime('%d-%m-%Y')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            if not df_explodido.empty:
+                st.success(f"🎉 Sucesso! O arquivo JSON foi processado. Foram geradas {len(df_explodido)} linhas no total.")
+                st.dataframe(df_explodido, use_container_width=True, hide_index=True)
+                
+                # Função para converter para Excel real (.xlsx)
+                def gerar_excel_bruto(df):
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        df.to_excel(writer, index=False, sheet_name='Itens_Explodidos')
+                    return output.getvalue()
+                
+                excel_bruto_bin = gerar_excel_bruto(df_explodido)
+                
+                st.download_button(
+                    label="📥 Baixar Excel Bruto Explodido (.xlsx)",
+                    data=excel_bruto_bin,
+                    file_name=f"base_bruta_explodida_{datetime.now().strftime('%d-%m-%Y')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            else:
+                st.warning("Não foram encontrados itens válidos para explodir dentro do JSON.")
             
         except Exception as e:
             st.error(f"Erro ao explodir o JSON: {e}")
@@ -83,7 +101,6 @@ with aba_consolidacao:
         try:
             df_para_agrupar = pd.read_excel(excel_para_somar)
             
-            # Limpeza padrão de segurança
             df_para_agrupar['Código de Barras'] = df_para_agrupar['Código de Barras'].astype(str).str.strip()
             df_para_agrupar['Produto'] = df_para_agrupar['Produto'].astype(str).str.strip()
             
@@ -92,11 +109,10 @@ with aba_consolidacao:
             else:
                 df_para_agrupar['Data de Validade'] = df_para_agrupar['Data de Validade'].fillna('').astype(str).str.strip()
 
-            # MOTOR DE SOMA DEFINITIVO:
-            # Agrupa por Código e Validade, e conta quantas linhas repetidas existem no Excel (fazendo a soma)
+            # Agrupa por Código e Validade, e conta a quantidade de linhas físicas repetidas
             df_consolidado = df_para_agrupar.groupby(['Código de Barras', 'Data de Validade']).agg({
                 'Produto': 'first', 
-                'Código de Barras': 'size' # Conta a quantidade de linhas físicas idênticas
+                'Código de Barras': 'size' 
             }).rename(columns={'Código de Barras': 'Quantidade'}).reset_index()
             
             df_final = df_consolidado[['Produto', 'Código de Barras', 'Data de Validade', 'Quantidade']]
