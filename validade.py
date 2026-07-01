@@ -1,5 +1,5 @@
 import streamlit as st
-import pandas as pd
+import pandas as pd 
 import json
 
 st.set_page_config(page_title="Painel de Validades", layout="wide")
